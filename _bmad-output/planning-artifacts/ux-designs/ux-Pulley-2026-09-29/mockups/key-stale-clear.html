@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulley — stale and clear</title>
+<style>
+/* Governed by DESIGN.md: Brand & Style, Colors, Layout & Spacing, Components.
+   Governed by EXPERIENCE.md: Component Patterns, State Patterns (Clear/Offline), UJ-2 and UJ-3.
+   Placement and corgi artwork are illustrative assumptions; the spines win. */
+:root{font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:var(--vscode-foreground,#cccccc);background:var(--vscode-editor-background,#1e1e1e)}*{box-sizing:border-box}body{margin:0;padding:24px}.annotation{max-width:680px;margin:0 auto 12px;color:var(--vscode-descriptionForeground,#999);font-size:12px;line-height:1.4}.screens{display:flex;gap:18px;justify-content:center;flex-wrap:wrap}.sidebar{width:320px;min-height:410px;background:var(--vscode-sideBar-background,#252526);border:1px solid var(--vscode-panel-border,#454545)}.caption{margin:0 0 6px;font-size:12px;color:var(--vscode-descriptionForeground,#999)}.activity{height:35px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--vscode-panel-border,#454545);letter-spacing:.07em;font-size:11px;font-weight:600}.view{height:32px;display:flex;align-items:center;gap:8px;padding:0 11px;font-weight:600}.chevron{font-size:10px;color:var(--vscode-descriptionForeground,#999)}.grow{flex:1}.count{color:var(--vscode-descriptionForeground,#999);font-weight:400}.refresh{width:24px;height:24px;display:grid;place-items:center;color:inherit;border:0;background:none;font-size:17px}.status{display:flex;gap:10px;align-items:center;padding:9px 12px 12px;border-bottom:1px solid var(--vscode-panel-border,#454545)}.corgi{width:32px;height:32px;flex:none;object-fit:contain}.state-text{font-size:12px;line-height:1.4}.muted{display:block;color:var(--vscode-descriptionForeground,#999)}.row{min-height:52px;padding:7px 12px 7px 24px;border-bottom:1px solid var(--vscode-panel-border,#454545)}.title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{margin-top:4px;color:var(--vscode-descriptionForeground,#999);font-size:12px}.recover{margin:10px 12px;padding:5px 9px;background:var(--vscode-button-background,#0e639c);color:var(--vscode-button-foreground,#fff);border:0;font:inherit}.clear{color:var(--vscode-descriptionForeground,#999)}
+</style>
+</head>
+<body>
+<p class="annotation">Illustrative assumption: corgi artwork and placement. The stale state preserves prior rows; clear appears only after a successful zero-result check. Actual native view constraints require prototyping.</p>
+<div class="screens">
+<section><p class="caption">Failed check: last known request remains visible</p><main class="sidebar" aria-label="Stale Pulley sidebar mockup"><div class="activity">EXPLORER</div><div class="view"><span class="chevron">▼</span><span>PULLEY</span><span class="grow"></span><span class="count">1 · stale</span><button class="refresh" aria-label="Refresh" title="Refresh">↻</button></div><div class="status"><img class="corgi" src="./corgi.svg" alt="" aria-hidden="true"><div class="state-text">Couldn't check GitHub.<span class="muted">Showing last known requests from 9:41 AM.</span></div></div><div class="row" role="link" tabindex="0" aria-label="octo/pulley, Update review queue, by Alex Chen, requested 2 hours ago, last known request"><div class="title">Update review queue</div><div class="meta">octo/pulley · Alex Chen · Requested 2h ago</div></div><button class="recover">Refresh</button></main></section>
+<section><p class="caption">Successful check: no requests</p><main class="sidebar" aria-label="Clear Pulley sidebar mockup"><div class="activity">EXPLORER</div><div class="view"><span class="chevron">▼</span><span>PULLEY</span><span class="grow"></span><span class="count">0</span><button class="refresh" aria-label="Refresh" title="Refresh">↻</button></div><div class="status"><img class="corgi" src="./corgi-resting.svg" alt="" aria-hidden="true"><div class="state-text clear">No reviews are waiting in repositories visible to this GitHub sign-in.<span class="muted">Last checked 9:41 AM</span></div></div></main></section>
+</div>
+</body>
+</html>
+

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulley — pending backlog</title>
+<style>
+/* Governed by DESIGN.md: Brand & Style, Colors, Layout & Spacing, Components.
+   Governed by EXPERIENCE.md: Component Patterns, State Patterns (Pending/Backlog), UJ-2.
+   Placement and corgi artwork are illustrative assumptions; the spines win. */
+:root{font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:var(--vscode-foreground,#cccccc);background:var(--vscode-editor-background,#1e1e1e)}
+*{box-sizing:border-box}body{margin:0;padding:24px}.annotation{max-width:360px;margin:0 auto 12px;color:var(--vscode-descriptionForeground,#999);font-size:12px;line-height:1.4}.sidebar{width:320px;min-height:560px;margin:auto;background:var(--vscode-sideBar-background,#252526);border:1px solid var(--vscode-panel-border,#454545)}
+.activity{height:35px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--vscode-panel-border,#454545);letter-spacing:.07em;font-size:11px;font-weight:600}.view{height:32px;display:flex;align-items:center;gap:8px;padding:0 11px;font-weight:600}.chevron{font-size:10px;color:var(--vscode-descriptionForeground,#999)}.grow{flex:1}.count{color:var(--vscode-descriptionForeground,#999);font-weight:400}.refresh{width:24px;height:24px;display:grid;place-items:center;color:inherit;border:0;background:none;font-size:17px}.status{display:flex;gap:10px;align-items:center;padding:9px 12px 12px;border-bottom:1px solid var(--vscode-panel-border,#454545)}
+.corgi{width:32px;height:32px;flex:none;object-fit:contain}.state-text{font-size:12px;line-height:1.4}.muted{display:block;color:var(--vscode-descriptionForeground,#999)}
+.row{min-height:52px;padding:7px 12px 7px 24px;border-bottom:1px solid var(--vscode-panel-border,#454545)}.row:focus{outline:1px solid var(--vscode-focusBorder,#007fd4);outline-offset:-1px}.title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{margin-top:4px;color:var(--vscode-descriptionForeground,#999);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.footer{padding:10px 12px;color:var(--vscode-descriptionForeground,#999);font-size:12px}
+</style>
+</head>
+<body>
+<p class="annotation">Illustrative assumption: corgi artwork and placement. Layout uses a narrow, theme-aware VS Code sidebar treatment; actual native view constraints require prototyping.</p>
+<main class="sidebar" aria-label="Pulley sidebar mockup">
+  <div class="activity">EXPLORER</div>
+  <div class="view"><span class="chevron">▼</span><span>PULLEY</span><span class="grow"></span><span class="count" aria-label="3 reviews waiting">3</span><button class="refresh" aria-label="Refresh" title="Refresh">↻</button></div>
+  <div class="status"><img class="corgi" src="./corgi.svg" alt="" aria-hidden="true"><div class="state-text">3 reviews are waiting.<span class="muted">Last checked 9:41 AM</span></div></div>
+  <div class="row" tabindex="0" role="link" aria-label="octo/pulley, Update review queue, by Alex Chen, requested 2 hours ago"><div class="title">Update review queue</div><div class="meta">octo/pulley · Alex Chen · Requested 2h ago</div></div>
+  <div class="row" tabindex="0" role="link" aria-label="octo/editor-tools, Handle GitHub reconnect state, by Sam Lee, requested yesterday"><div class="title">Handle GitHub reconnect state</div><div class="meta">octo/editor-tools · Sam Lee · Requested yesterday</div></div>
+  <div class="row" tabindex="0" role="link" aria-label="team/docs, Polish notification copy for requests, by Riley Park, request time unavailable"><div class="title">Polish notification copy for requests</div><div class="meta">team/docs · Riley Park · Request time unavailable</div></div>
+</main>
+</body>
+</html>

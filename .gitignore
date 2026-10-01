@@ -1,0 +1,8 @@
+out
+dist
+node_modules
+.vscode-test/
+*.vsix
+.uv-cache/
+_bmad/render/
+_bmad/config.user.toml

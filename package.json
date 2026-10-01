@@ -1,0 +1,80 @@
+{
+  "name": "pulley",
+  "displayName": "Pulley",
+  "description": "A quiet queue of GitHub review requests waiting for you.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pulley",
+          "title": "Pulley",
+          "icon": "media/pulley.svg"
+        }
+      ]
+    },
+    "views": {
+      "pulley": [
+        {
+          "id": "pulley.queue",
+          "name": "Review Queue"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "pulley.queue",
+        "contents": "Pulley needs access to your GitHub account to find pull requests waiting for your review. Only repositories visible to this GitHub sign-in are included.\n[Connect](command:pulley.connect)",
+        "when": "pulley.connection == unconnected"
+      }
+    ],
+    "commands": [
+      {
+        "command": "pulley.connect",
+        "title": "Connect to GitHub",
+        "category": "Pulley"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint && npm run test:core",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vscode-test",
+    "test:core": "node --test \"test/core/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.138.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "typescript-eslint": "^8.61.1",
+    "eslint": "^10.5.0",
+    "esbuild": "^0.28.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^6.0.3",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
