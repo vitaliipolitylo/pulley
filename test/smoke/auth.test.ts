@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import type * as vscode from 'vscode';
-import { connect, lookupSilently, onGitHubSessionsChanged, type GetSession } from '../../src/shell/auth.ts';
+import { connect, getToken, lookupSilently, onGitHubSessionsChanged, type GetSession } from '../../src/shell/auth.ts';
 
 const TOKEN = 'gho_secret_token_value';
 const session: vscode.AuthenticationSession = {
@@ -82,5 +82,23 @@ suite('Auth', () => {
 			throw new Error('provider unavailable');
 		});
 		assert.deepStrictEqual(await lookupSilently(() => {}, getSession), { kind: 'unconnected' });
+	});
+});
+
+suite('Auth getToken', () => {
+	test('silent lookup returns account id and token for one check', async () => {
+		const { calls, getSession } = recorder(async () => session);
+		assert.deepStrictEqual(await getToken(() => {}, getSession), { accountId: '42', token: TOKEN });
+		assert.deepStrictEqual(calls[0].options, { silent: true });
+	});
+
+	test('no session or a failing lookup returns undefined without logging a token', async () => {
+		assert.strictEqual(await getToken(() => {}, recorder(async () => undefined).getSession), undefined);
+		const lines: string[] = [];
+		const failing = recorder(async () => {
+			throw new Error('provider unavailable');
+		});
+		assert.strictEqual(await getToken((l) => lines.push(l), failing.getSession), undefined);
+		assert.ok(!lines.join('\n').includes(TOKEN));
 	});
 });

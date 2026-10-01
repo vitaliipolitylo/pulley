@@ -36,6 +36,23 @@ export async function lookupSilently(log: Log, getSession: GetSession = defaultG
 	}
 }
 
+/**
+ * Fresh silent lookup for one check. The token is returned to the caller for
+ * that check only; it is never stored or logged. Never prompts, never throws.
+ */
+export async function getToken(
+	log: Log,
+	getSession: GetSession = defaultGetSession,
+): Promise<{ accountId: string; token: string } | undefined> {
+	try {
+		const session = await getSession(PROVIDER_ID, SCOPES, { silent: true });
+		return session ? { accountId: session.account.id, token: session.accessToken } : undefined;
+	} catch (error) {
+		log(copy.log.silentLookupFailed(shortReason(error)));
+		return undefined;
+	}
+}
+
 /** Explicit Connect: may show the VS Code GitHub consent. Never throws. */
 export async function connect(log: Log, getSession: GetSession = defaultGetSession): Promise<ConnectionState> {
 	log(copy.log.connectStarted);

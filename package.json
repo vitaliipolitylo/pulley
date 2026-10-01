@@ -59,7 +59,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src test",
     "test": "vscode-test",
-    "test:core": "node --test \"test/core/**/*.test.ts\""
+    "test:core": "node --test \"test/core/**/*.test.ts\" \"test/shell/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/vscode": "^1.138.0",
