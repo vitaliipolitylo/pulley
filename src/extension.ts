@@ -1,21 +1,44 @@
 import * as vscode from 'vscode';
+import { shortReason, type ConnectionState } from './core/connection.ts';
 import { copy } from './core/copy.ts';
-import type { ConnectionState } from './core/connection.ts';
+import { reconcile } from './core/reconcile.ts';
 import type { CheckResult } from './core/types.ts';
+import { viewModel } from './core/viewModel.ts';
 import { connect, getToken, lookupSilently, onGitHubSessionsChanged } from './shell/auth.ts';
 import { checkWithRetry } from './shell/checkWithRetry.ts';
 import { runCheck } from './shell/github.ts';
 import { QueueView } from './shell/queueView.ts';
+import { createStore } from './shell/store.ts';
+
+/** Check interval until Story 1.5 adds the `pulley.checkIntervalMinutes` setting. */
+const INTERVAL_MS = 15 * 60 * 1000;
 
 export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel(copy.outputChannelName);
 	const log = (line: string): void => output.appendLine(`[${new Date().toISOString()}] ${line}`);
 	const view = new QueueView();
+	const store = createStore(context.globalState, log);
 	context.subscriptions.push(output, view);
 
-	// Window memory only. Each lookup takes a ticket so a slower, older lookup
-	// (or the check that follows it) cannot overwrite the result of a newer one.
+	// Window memory only (never persisted): the connection (and so the active account),
+	// the number of checks in flight, and a ticket per lookup so a slower, older lookup
+	// cannot overwrite the connection state of a newer one.
+	let connection: ConnectionState = { kind: 'unknown' };
+	let checking = 0;
 	let latestTicket = 0;
+
+	/** Renders from a fresh store read, which is how other windows' writes appear. */
+	const render = (): Promise<void> => {
+		const read = store.read();
+		const model = viewModel(
+			read.readOnly ? undefined : read.stored,
+			{ connection, readOnly: read.readOnly, checking: checking > 0 },
+			{ now: Date.now() },
+		);
+		return view.render(model);
+	};
+	const sub = store.onDidChange(() => void render());
+	context.subscriptions.push({ dispose: () => sub.dispose() });
 
 	/** One check with a fresh silent token; a 401 retries the silent lookup once (AD-11). */
 	const checkOnce = (): Promise<CheckResult | undefined> =>
@@ -28,22 +51,32 @@ export function activate(context: vscode.ExtensionContext): void {
 		});
 
 	// Temporary single check after a session is found (Story 1.5 replaces this with the scheduler).
-	const checkAfterConnect = async (ticket: number, accountId: string): Promise<void> => {
-		view.renderChecking();
-		const result = await checkOnce();
-		if (ticket !== latestTicket) {
-			return;
+	// Every result goes through store.mutate(reconcile): reconcile drops other accounts' results
+	// (rule 1) and results older than the last applied complete check (rule 4).
+	const checkAfterConnect = async (ticket: number): Promise<void> => {
+		checking++;
+		void render();
+		let result: CheckResult | undefined;
+		try {
+			result = await checkOnce();
+		} finally {
+			checking--;
 		}
 		if (!result) {
-			log(copy.log.checkNoSession);
-			await view.render({ kind: 'unconnected' });
+			if (ticket === latestTicket) {
+				log(copy.log.checkNoSession);
+				connection = { kind: 'unconnected' };
+			}
+			await render();
 			return;
 		}
-		if (result.accountId !== accountId) {
-			// The session changed under this check; the newer lookup's check will render.
-			return;
+		const activeAccountId = connection.kind === 'connected' ? connection.accountId : undefined;
+		try {
+			await store.mutate(reconcile, result, { now: Date.now(), activeAccountId, intervalMs: INTERVAL_MS });
+		} catch (error) {
+			log(copy.log.stateWriteFailed(shortReason(error)));
+			await render();
 		}
-		view.renderCheck(result);
 	};
 
 	const apply = async (lookup: Promise<ConnectionState>): Promise<void> => {
@@ -52,14 +85,15 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (ticket !== latestTicket) {
 			return;
 		}
+		connection = state;
 		log(copy.log.stateChanged(state.kind));
-		await view.render(state);
+		await render();
 		if (state.kind === 'connected' && ticket === latestTicket) {
-			await checkAfterConnect(ticket, state.accountId);
+			await checkAfterConnect(ticket);
 		}
 	};
 
-	void view.render({ kind: 'unknown' });
+	void render();
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('pulley.connect', () => apply(connect(log))),

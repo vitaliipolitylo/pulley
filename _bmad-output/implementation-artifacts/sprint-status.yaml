@@ -6,7 +6,7 @@
 # Retrospective: optional, done
 
 generated: 09-30-2026 01:51
-last_updated: 10-01-2026 12:30
+last_updated: 10-01-2026 15:00
 project: Pulley
 project_key: NOKEY
 tracking_system: file-system
@@ -16,7 +16,7 @@ development_status:
   epic-1: in-progress
   1-1-set-up-initial-project-from-starter-template: review
   1-2-find-direct-review-requests-across-github: review
-  1-3-keep-the-queue-accurate-across-checks: backlog
+  1-3-keep-the-queue-accurate-across-checks: review
   1-4-understand-and-open-a-waiting-review: backlog
   1-5-refresh-and-schedule-queue-checks: backlog
   1-6-recover-from-missing-or-uncertain-github-data: backlog

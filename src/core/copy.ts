@@ -13,13 +13,14 @@ export const copy = {
 		'Pulley needs access to your GitHub account to find pull requests waiting for your review. ' +
 		'Only repositories visible to this GitHub sign-in are included.',
 	connectButton: 'Connect',
-	connected: (label: string): string => `Connected as ${label}. Waiting for the first check.`,
 
 	checking: 'Checking review requests…',
 	pending: (n: number): string => (n === 1 ? '1 review is waiting.' : `${n} reviews are waiting.`),
 	clear: 'No reviews are waiting in repositories visible to this GitHub sign-in.',
 	incomplete: 'GitHub returned only part of the results, so this list may be incomplete.',
 	failed: "Couldn't check GitHub.",
+	stale: "Couldn't check GitHub. Showing the last known requests.",
+	updatePulley: 'This data was saved by a newer version of Pulley. Update Pulley to see your review queue.',
 
 	log: {
 		connectStarted: 'Connect requested.',
@@ -40,6 +41,12 @@ export const copy = {
 			`Paging stopped after page ${pages} (no usable cursor or page limit); the list may be incomplete.`,
 		checkSkippedNodes: (page: number, count: number): string =>
 			`Page ${page} had ${count} unreadable search result(s); the list may be incomplete.`,
+		stateNewerSchema: (version: number): string =>
+			`Stored state has schemaVersion ${version}, newer than this Pulley understands; read-only until Pulley is updated.`,
+		stateMalformed: (problem: string): string =>
+			`Stored state is malformed (${problem}); it will be replaced with empty state on the next write.`,
+		listenerFailed: (reason: string): string => `Re-render after a state change failed: ${reason}`,
+		stateWriteFailed: (reason: string): string => `Applying a check result failed: ${reason}`,
 	},
 } as const;
 

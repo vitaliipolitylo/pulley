@@ -62,14 +62,33 @@ Fill in each section from a real run. When a limitation is found, record it as e
 
 ## Cross-window `globalState` propagation
 
-_Filled in during Story 1.3_ (Story 1.2 keeps results in window memory only).
+Story 1.3 moved check results into `globalState` under `pulley.state.v1`, written only by
+`store.mutate` (`src/shell/store.ts`).
 
-- Does a `globalState.update` in one window become visible to another window's
-  `globalState.get` without a reload? How quickly?
-- Outcome:
+- **Design:** every window renders from a fresh `store.read()` (`globalState.get` → `migrate`)
+  on each render, and every `store.mutate` re-reads before applying its transition. Pulley does
+  not subscribe to cross-window change events. A second window therefore shows another window's
+  rows **after its next render or check** (for example its own check after activation or Connect;
+  Story 1.5 adds periodic checks and Refresh).
+- **Expected:** VS Code shares `globalState` across windows of the same profile, but each window
+  keeps a cached copy that is refreshed from storage asynchronously, so a write from window A may
+  not be visible to window B's `get` immediately.
+- **Risk to settle in the live run:** `store.mutate` writes the whole value. If window B's cache
+  has not seen window A's write when B mutates, B's write can overwrite A's (last writer wins).
+  Today both windows check the same account, so the next complete check converges; Epic 2's alert
+  history makes this more important.
+- **How to observe:** open two Extension Development Host windows (same profile). In window A,
+  run **Pulley: Connect to GitHub**. In window B, note when the rows appear without a reload
+  (B's next render or check), and whether a check in B ever drops rows that A just added.
+- **Observed propagation (pending the human live run):**
+- **Outcome:** Constraint for Story 1.5: a second window sees new rows only after its next render
+  or check. Lost-write risk to be confirmed or resolved by the live run.
 
 ## Limitations and decisions
 
 | # | Limitation | Resolved / Constraint for 1.3 | Notes |
 |---|------------|-------------------------------|-------|
-|   |            |                               |       |
+| 1 | Partial GraphQL errors (`data` + `errors`), a failed later page, unreadable (`null`) search nodes, or a paging stop | Constraint, implemented | The adapter reports `complete: false`; `reconcile` (rule 6) never deletes on an incomplete success, and a complete result that started before (or at the same time as) the newest applied incomplete result deletes nothing. |
+| 2 | SSO/OAuth-restricted orgs may make every check incomplete | Constraint, implemented | Items are added and kept but never removed until a complete check; any applied newer success clears `lastFailure`, so the view is not stuck on stale. Rows from incomplete checks only show the "may be incomplete" hint. |
+| 3 | SSO-hidden PRs silently absent (no error, no `null` node) | Open: needs the live run | If GitHub omits them with no signal, a complete check would delete them. Record here if observed. |
+| 4 | Cross-window propagation is not immediate | Constraint for 1.5 | See the section above. |

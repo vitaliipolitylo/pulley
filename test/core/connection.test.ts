@@ -3,56 +3,22 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { copy, unconnectedWelcome } from '../../src/core/copy.ts';
-import {
-	connectionMessage,
-	connectionPresentation,
-	shortReason,
-	type ConnectionState,
-} from '../../src/core/connection.ts';
+import { shortReason } from '../../src/core/connection.ts';
 
 // npm scripts run from the project root.
 const root = process.cwd();
 const VISIBILITY_NOTE = 'Only repositories visible to this GitHub sign-in are included.';
 
-const cases: Array<{ name: string; state: ConnectionState; message: string; hasMessage: boolean }> = [
-	{ name: 'unknown', state: { kind: 'unknown' }, message: 'Checking GitHub connection…', hasMessage: true },
-	{ name: 'unconnected', state: { kind: 'unconnected' }, message: copy.unconnectedExplanation, hasMessage: false },
-	{
-		name: 'connected',
-		state: { kind: 'connected', accountId: '123', label: 'octocat' },
-		message: 'Connected as octocat. Waiting for the first check.',
-		hasMessage: true,
-	},
-];
-
-for (const c of cases) {
-	test(`connectionMessage: ${c.name}`, () => {
-		assert.equal(connectionMessage(c.state), c.message);
-	});
-
-	test(`connectionPresentation: ${c.name}`, () => {
-		const p = connectionPresentation(c.state);
-		assert.equal(p.contextKey, c.state.kind);
-		assert.equal(p.message, c.hasMessage ? c.message : undefined);
-	});
-
-	test(`no zero count or "no reviews" state: ${c.name}`, () => {
-		const text = connectionMessage(c.state);
-		assert.doesNotMatch(text, /\b0\b|\bzero\b|no reviews/i);
-	});
-}
-
 test('unconnected copy carries the visibility note', () => {
-	assert.ok(connectionMessage({ kind: 'unconnected' }).includes(VISIBILITY_NOTE));
+	assert.ok(copy.unconnectedExplanation.includes(VISIBILITY_NOTE));
 	assert.ok(unconnectedWelcome.includes(VISIBILITY_NOTE));
 	assert.ok(unconnectedWelcome.includes('(command:pulley.connect)'));
 });
 
-test('input state is not mutated', () => {
-	const state: ConnectionState = { kind: 'connected', accountId: '1', label: 'a' };
-	const before = JSON.stringify(state);
-	connectionPresentation(state);
-	assert.equal(JSON.stringify(state), before);
+test('connection and loading copy show no zero or "no reviews"', () => {
+	for (const text of [copy.checkingConnection, copy.unconnectedExplanation, copy.checking]) {
+		assert.doesNotMatch(text, /\b0\b|\bzero\b|no reviews/i);
+	}
 });
 
 test('shortReason is single-line and bounded', () => {
@@ -82,5 +48,17 @@ test('src/core has no vscode import', () => {
 	for (const file of files) {
 		const source = readFileSync(join(root, 'src', 'core', file), 'utf8');
 		assert.doesNotMatch(source, /from\s+['"]vscode['"]|require\(\s*['"]vscode['"]\s*\)/);
+	}
+});
+
+test('globalState.update is called only from src/shell/store.ts', () => {
+	const walk = (dir: string): string[] =>
+		readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+			e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [],
+		);
+	for (const file of walk(join(root, 'src'))) {
+		const source = readFileSync(file, 'utf8');
+		const writes = /\.update\(\s*STATE_KEY|globalState\.update|workspaceState/.test(source);
+		assert.equal(writes, file.endsWith(join('shell', 'store.ts')), file);
 	}
 });
