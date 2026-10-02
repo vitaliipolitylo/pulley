@@ -34,6 +34,8 @@ export const copy = {
 	stale: (time: string): string => `Couldn't check GitHub. Showing the last known requests from ${time}.`,
 	/** A failure with no prior complete success: no count and no clear state. */
 	unavailable: "Couldn't check GitHub, so the queue is unavailable.",
+	/** Appended to the stale/unavailable lead when this window could not save the latest check. */
+	writeFailed: "Pulley couldn't save the latest check. Refresh to try again.",
 	/** Appended to the pending and clear messages once a complete check has succeeded (Story 1.5). */
 	lastChecked: (time: string): string => `Last checked ${time}`,
 	updatePulley: 'This data was saved by a newer version of Pulley. Update Pulley to see your review queue.',
@@ -78,6 +80,8 @@ export const copy = {
 			`Page ${page} failed (${reason}, ${detail}); keeping earlier pages, the list may be incomplete.`,
 		checkPagingStopped: (pages: number): string =>
 			`Paging stopped after page ${pages} (no usable cursor or page limit); the list may be incomplete.`,
+		checkSearchCapped: (issueCount: number): string =>
+			`GitHub search matched ${issueCount} results but returns at most 1000; the list may be incomplete.`,
 		checkSkippedNodes: (page: number, count: number): string =>
 			`Page ${page} had ${count} unreadable search result(s); the list may be incomplete.`,
 		stateNewerSchema: (version: number): string =>
@@ -122,4 +126,10 @@ export const failureCopy: Readonly<Record<FailureReason, { hint: string; action:
 export function failureMessage(reason: FailureReason, lastSuccessTime: string | undefined): string {
 	const lead = lastSuccessTime === undefined ? copy.unavailable : copy.stale(lastSuccessTime);
 	return `${lead} ${failureCopy[reason].hint}`;
+}
+
+/** The message when this window could not save the latest check: the same lead, then the write-failure hint. */
+export function writeFailedMessage(lastSuccessTime: string | undefined): string {
+	const lead = lastSuccessTime === undefined ? copy.unavailable : copy.stale(lastSuccessTime);
+	return `${lead} ${copy.writeFailed}`;
 }

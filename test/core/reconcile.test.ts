@@ -219,6 +219,30 @@ const cases: Case[] = [
 		result: ok(20, false, [item('A')]),
 		expected: stored({ Y: { ...AB, ...attempt(20), lastIncompleteFetchStartedAt: 20 } }),
 	},
+	// Review fixes: the newest evidence wins.
+	{
+		name: 'review fix: an older success after a newer incomplete keeps existing metadata, adds new ids, keeps bookkeeping and the deletion guard',
+		stored: stored({
+			Y: { ...AB, ...attempt(9), lastSuccessAt: 2, lastAppliedFetchStartedAt: 2, lastIncompleteFetchStartedAt: 9, items: itemsOf(tracked('A', 1, { title: 'Newer A' }), tracked('B', 2)) },
+		}),
+		result: ok(4, true, [item('A', { title: 'Older A', requestedAt: 3 }), item('C')]),
+		expected: stored({
+			Y: {
+				...AB,
+				...attempt(4),
+				lastIncompleteFetchStartedAt: 9,
+				lastSuccessAt: 4,
+				lastAppliedFetchStartedAt: 4,
+				items: itemsOf(tracked('A', 1, { title: 'Newer A' }), tracked('B', 2), tracked('C', NOW)),
+			},
+		}),
+	},
+	{
+		name: 'review fix: an older failure applied after a newer failure keeps the newer lastFailure; attempt fields still record',
+		stored: stored({ Y: { ...AB, lastFailure: { at: 9, reason: 'rate_limited' } } }),
+		result: fail(4),
+		expected: stored({ Y: { ...AB, ...attempt(4), lastFailure: { at: 9, reason: 'rate_limited' } } }),
+	},
 ];
 
 for (const c of cases) {

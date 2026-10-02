@@ -49,9 +49,15 @@ function applySuccess(account: Account, result: CheckSuccess, now: number): Acco
 		return account;
 	}
 
-	// Rule 5: upsert every item.
+	// Rule 5: upsert every item. A result older than an applied incomplete result still adds new
+	// ids, but every existing id keeps its stored metadata (there is no per-item write time, so any
+	// stored item may hold newer data than this result).
+	const olderThanIncomplete = account.lastIncompleteFetchStartedAt !== undefined && at < account.lastIncompleteFetchStartedAt;
 	const items: Account['items'] = { ...account.items };
 	for (const item of result.items) {
+		if (olderThanIncomplete && items[item.id]) {
+			continue;
+		}
 		items[item.id] = upsert(items[item.id], item, now);
 	}
 	let next: Account = { ...account, firstCheckDone: true, items };
@@ -92,8 +98,15 @@ export function reconcile(stored: Stored, result: CheckResult, ctx: ReconcileCtx
 
 	const next = result.ok
 		? applySuccess(attempted, result, ctx.now)
-		: // Rule 3: a failure changes only the attempt fields and lastFailure.
-			{ ...attempted, lastFailure: { at: result.fetchStartedAt, reason: result.reason } };
+		: // Rule 3: a failure changes only the attempt fields and lastFailure; an older failure
+			// applied late never replaces a newer one.
+			{
+				...attempted,
+				lastFailure:
+					current.lastFailure && current.lastFailure.at > result.fetchStartedAt
+						? current.lastFailure
+						: { at: result.fetchStartedAt, reason: result.reason },
+			};
 
 	return {
 		stored: { ...stored, accounts: { ...stored.accounts, [accountId]: next } },

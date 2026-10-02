@@ -45,6 +45,8 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	let checking = 0;
 	let latestTicket = 0;
 	let latestSilentLookup: Promise<unknown> = Promise.resolve();
+	/** The last attempt to save a check result failed; cleared by the next successful save. */
+	let writeFailed = false;
 
 	/** Waits until the newest silent lookup has settled, including ones started meanwhile. */
 	const silentLookupsSettled = async (): Promise<void> => {
@@ -63,7 +65,7 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 		const now = Date.now();
 		const model = viewModel(
 			read.readOnly ? undefined : read.stored,
-			{ connection, readOnly: read.readOnly, checking: checking > 0 },
+			{ connection, readOnly: read.readOnly, checking: checking > 0, writeFailed },
 			{ now, formatTime: (ms) => formatCheckTime(ms, now) },
 		);
 		return view.render(model);
@@ -88,7 +90,10 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 		}
 		try {
 			await store.mutate(reconcile, result, { now: Date.now(), activeAccountId: activeAccountId(connection), intervalMs: getIntervalMs() });
+			writeFailed = false;
 		} catch (error) {
+			// Shown in the view (stale or unavailable, with Refresh), not only logged.
+			writeFailed = true;
 			log(copy.log.stateWriteFailed(shortReason(error)));
 		}
 	};
@@ -139,6 +144,10 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			}
 			const next = generation.next();
 			const state: ConnectionState = found.kind === 'connected' ? { ...found, generation: next } : found;
+			if (activeAccountId(state) !== activeAccountId(connection)) {
+				// A save error belongs to the previous account; never show it for the new one.
+				writeFailed = false;
+			}
 			connection = state;
 			log(copy.log.stateChanged(state.kind === 'unconnected' ? `unconnected (${state.reason})` : state.kind));
 			await render();

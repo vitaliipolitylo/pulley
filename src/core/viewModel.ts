@@ -1,7 +1,7 @@
 // The first view model (AD-12): everything the queue view shows, derived from stored
 // state plus window memory. Pure: no clock reads, never mutates its inputs.
 import { activeAccountId, type ConnectionState } from './connection.ts';
-import { copy, failureCopy, failureMessage } from './copy.ts';
+import { copy, failureCopy, failureMessage, writeFailedMessage } from './copy.ts';
 import type { Account, Row, Stored, Tracked, ViewModel } from './types.ts';
 
 /** Window memory the view model needs (never persisted). */
@@ -11,6 +11,8 @@ export interface WindowView {
 	readOnly: boolean;
 	/** A check is in flight in this window. */
 	checking: boolean;
+	/** The last attempt to save a check result in this window failed; cleared by the next successful save. */
+	writeFailed?: boolean;
 }
 
 export interface ViewModelCtx {
@@ -108,6 +110,12 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 		return message === undefined ? model : { ...model, message };
 	}
 
+	if (window.writeFailed) {
+		// The latest check could not be saved: what is stored may be out of date. Show it as stale
+		// (or unavailable with no prior success), never a count or clear, and offer Refresh.
+		return { status: 'stale', action: 'refresh', count: null, message: writeFailedMessage(lastSuccessTime), rows: rowsOf(account, ctx.now) };
+	}
+
 	if (!account) {
 		return { status: 'loading', count: null, message: copy.checking, rows: [] };
 	}
@@ -137,10 +145,15 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 		const message = incomplete ? `${copy.pending(n)} ${copy.incomplete}` : copy.pending(n);
 		return { status: 'pending', count: lastSuccessAt === undefined ? null : n, message, ...checked, rows };
 	}
-	if (lastSuccessAt !== undefined) {
+	const newerIncomplete =
+		lastSuccessAt !== undefined &&
+		account.lastIncompleteFetchStartedAt !== undefined &&
+		account.lastIncompleteFetchStartedAt > lastSuccessAt;
+	if (lastSuccessAt !== undefined && !newerIncomplete) {
 		return { status: 'clear', count: 0, message: copy.clear, ...checked, rows };
 	}
-	// Only incomplete successes that returned nothing (or none yet): never show a zero.
+	// Only incomplete successes that returned nothing (or none yet), or a newer incomplete check
+	// than the last complete one: never show a zero or clear.
 	const message = account.firstCheckDone && !window.checking ? copy.incomplete : copy.checking;
 	return { status: 'loading', count: null, message, rows };
 }

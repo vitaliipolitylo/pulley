@@ -17,3 +17,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-5-refresh-and-schedule-queue-checks.md`
   summary: Extract the scheduler wiring in `src/extension.ts` (runQueueCheck, Refresh progress-once, Connect manual trigger, config restart, lookup gating) into a testable factory and cover it, including the "No session" matrix row where it actually lives.
   evidence: Story 1.5 review found these behaviors run in no automated test; the scheduler tests use a fake runCheck and the "No session" case wraps checkWithRetry directly, so regressions in the activate closures would ship unnoticed.
+- source_spec: none
+  summary: Add an injection seam to `activate` in `src/extension.ts` and smoke-test that startup runs a queue check (rows and lastSuccessAt persist without Refresh) and that a session change to account B discards account A's in-flight result.
+  evidence: Split from the epic 1 review fix-up (review-epic-1-2026-10-02.md adversarial #11, verification-gap #1 and #2); test/smoke/activation.test.ts only asserts ext.isActive.
+- source_spec: none
+  summary: Complete the live-query spike in `docs/spikes/live-query.md` with an authenticated GitHub run, including SSO/restricted-organization observations, before treating removal behavior as verified.
+  evidence: Split from the epic 1 review fix-up (review-epic-1-2026-10-02.md adversarial #10); needs a live authenticated GitHub session and cannot be done by the agent.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-review-fixes.md`
+  summary: Once `activate` has an injection seam, smoke-test that a rejected `store.mutate` in `applyResult` renders stale with Refresh and the write-failure message, and that the flag clears after the next successful save or an account switch.
+  evidence: Review of the epic 1 fix-up found that removing `writeFailed = true`, its reset, or its pass-through in `render` passes every test; only the pure viewModel branch is tested.

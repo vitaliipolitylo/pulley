@@ -507,3 +507,41 @@ test('screen reader: successful polls that only move the check time leave the me
 	assert.deepEqual(new Set(polls.map((m) => m.message)).size, 1, 'one message across three polls');
 	assert.deepEqual(polls.map((m) => m.lastChecked), ['Last checked t5', 'Last checked t20', 'Last checked t35']);
 });
+
+// Review fixes: newer incomplete evidence and failed state writes.
+test('review fix: a newer incomplete check with no items after an empty complete one is not clear', () => {
+	const stored = withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastIncompleteFetchStartedAt: 9 });
+	const m = viewModel(stored, win(), { now: NOW, formatTime });
+	assert.deepEqual(m, { status: 'loading', count: null, message: copy.incomplete, rows: [] });
+	assert.equal(viewModel(stored, win({ checking: true }), { now: NOW, formatTime }).status, 'loading');
+	// An incomplete check older than the complete one still allows clear.
+	assert.equal(viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 9, lastIncompleteFetchStartedAt: 5 }), win(), { now: NOW, formatTime }).status, 'clear');
+});
+
+test('review fix: a failed state write shows stale rows with the last success time and Refresh', () => {
+	const stored = withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(tracked('A', 1)) });
+	const m = viewModel(stored, win({ writeFailed: true }), { now: NOW, formatTime });
+	assert.equal(m.status, 'stale');
+	assert.equal(m.action, 'refresh');
+	assert.equal(m.count, null);
+	assert.equal(m.rows.length, 1);
+	assert.equal(
+		m.message,
+		"Couldn't check GitHub. Showing the last known requests from t5. Pulley couldn't save the latest check. Refresh to try again.",
+	);
+	// Without the flag the same state is pending.
+	assert.equal(viewModel(stored, win(), { now: NOW, formatTime }).status, 'pending');
+});
+
+test('review fix: a failed state write with no account or no prior success is unavailable, never clear', () => {
+	for (const stored of [{ schemaVersion: 1, accounts: {} } as Stored, withAccount({ firstCheckDone: true })]) {
+		const m = viewModel(stored, win({ writeFailed: true }), { now: NOW, formatTime });
+		assert.deepEqual(m, {
+			status: 'stale',
+			action: 'refresh',
+			count: null,
+			message: `${copy.unavailable} ${copy.writeFailed}`,
+			rows: [],
+		});
+	}
+});

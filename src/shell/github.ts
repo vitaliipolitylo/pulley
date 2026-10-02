@@ -10,10 +10,15 @@ export const SEARCH_QUERY = 'is:pr is:open user-review-requested:@me archived:fa
 const PAGE_SIZE = 50;
 /** GitHub search returns at most 1000 results (20 pages); this only guards against a looping cursor. */
 const MAX_PAGES = 40;
+/** GitHub search can return at most this many results, whatever `issueCount` reports. */
+export const SEARCH_RESULT_CAP = 1000;
+/** Default bound on one page request, including reading its body. */
+export const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const QUERY = `query PulleyReviewRequests($cursor: String) {
   viewer { login }
   search(type: ISSUE, query: "${SEARCH_QUERY}", first: ${PAGE_SIZE}, after: $cursor) {
+    issueCount
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
@@ -47,7 +52,7 @@ export interface ResponseLike {
 
 export type FetchLike = (
 	url: string,
-	init: { method: 'POST'; headers: Record<string, string>; body: string },
+	init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ) => Promise<ResponseLike>;
 
 export interface RunCheckInput {
@@ -56,6 +61,8 @@ export interface RunCheckInput {
 	accountId: string;
 	fetchStartedAt: number;
 	log: (line: string) => void;
+	/** Bound on each page's request and body read; defaults to DEFAULT_TIMEOUT_MS. */
+	timeoutMs?: number;
 }
 
 export interface NormalizedPage {
@@ -64,6 +71,8 @@ export interface NormalizedPage {
 	skipped: number;
 	hasNextPage: boolean;
 	endCursor: string | undefined;
+	/** `search.issueCount` when GitHub reported a finite number; otherwise ignored. */
+	issueCount: number | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,14 +142,20 @@ function toItem(node: unknown, viewerLogin: string | undefined): RequestItem | u
 
 /**
  * Normalizes one GraphQL response body. Returns undefined when `data.search`
- * is missing or unreadable.
+ * is missing or unreadable, including pagination without a boolean `hasNextPage`
+ * (treating it as false could delete requests on pages never fetched).
  */
 export function normalizePage(json: unknown, viewerLogin: string | undefined): NormalizedPage | undefined {
 	if (!isObject(json) || !isObject(json.data)) {
 		return undefined;
 	}
 	const search = json.data.search;
-	if (!isObject(search) || !Array.isArray(search.nodes) || !isObject(search.pageInfo)) {
+	if (
+		!isObject(search) ||
+		!Array.isArray(search.nodes) ||
+		!isObject(search.pageInfo) ||
+		typeof search.pageInfo.hasNextPage !== 'boolean'
+	) {
 		return undefined;
 	}
 	const items: RequestItem[] = [];
@@ -156,8 +171,9 @@ export function normalizePage(json: unknown, viewerLogin: string | undefined): N
 	return {
 		items,
 		skipped,
-		hasNextPage: search.pageInfo.hasNextPage === true,
+		hasNextPage: search.pageInfo.hasNextPage,
 		endCursor: str(search.pageInfo.endCursor),
+		issueCount: typeof search.issueCount === 'number' && Number.isFinite(search.issueCount) ? search.issueCount : undefined,
 	};
 }
 
@@ -175,19 +191,48 @@ function isRateLimited(res: ResponseLike): boolean {
 	return res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after') !== null;
 }
 
+/**
+ * Runs `work` with an abort signal, racing it against a timer that aborts and rejects. A fetch
+ * may ignore the signal, so the race (not the abort) is what bounds the wait. The timer is
+ * always cleared.
+ */
+async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			reject(new Error(`timed out after ${timeoutMs} ms`));
+		}, timeoutMs);
+	});
+	try {
+		return await Promise.race([work(controller.signal), timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function fetchPage(input: RunCheckInput, cursor: string | undefined): Promise<PageOutcome> {
 	let res: ResponseLike;
+	let body: string;
 	try {
-		res = await input.fetch(GRAPHQL_ENDPOINT, {
-			method: 'POST',
-			headers: {
-				Authorization: `bearer ${input.token}`,
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-				'User-Agent': 'Pulley-VSCode',
-			},
-			body: JSON.stringify({ query: QUERY, variables: { cursor: cursor ?? null } }),
-		});
+		// The request and the body read share one bound; either stalling is a network failure.
+		[res, body] = await withTimeout(async (signal) => {
+			const response = await input.fetch(GRAPHQL_ENDPOINT, {
+				method: 'POST',
+				headers: {
+					Authorization: `bearer ${input.token}`,
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'User-Agent': 'Pulley-VSCode',
+				},
+				body: JSON.stringify({ query: QUERY, variables: { cursor: cursor ?? null } }),
+				signal,
+			});
+			// Only a 2xx body is parsed below; other statuses never read it.
+			const text = response.ok ? await response.text() : '';
+			return [response, text] as const;
+		}, input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 	} catch (error) {
 		return { kind: 'fail', reason: 'network', detail: shortReason(error) };
 	}
@@ -202,7 +247,7 @@ async function fetchPage(input: RunCheckInput, cursor: string | undefined): Prom
 	}
 	let json: unknown;
 	try {
-		json = JSON.parse(await res.text());
+		json = JSON.parse(body);
 	} catch {
 		return { kind: 'fail', reason: 'graphql_error', detail: `HTTP ${res.status}, non-JSON body` };
 	}
@@ -239,6 +284,7 @@ export async function runCheck(input: RunCheckInput): Promise<CheckResult> {
 		let complete = true;
 		let pages = 0;
 		let errorCount = 0;
+		let searchCapped = false;
 		let viewerLogin: string | undefined;
 		let cursor: string | undefined;
 
@@ -275,7 +321,9 @@ export async function runCheck(input: RunCheckInput): Promise<CheckResult> {
 			}
 
 			if (pageFailure) {
-				if (page === 1) {
+				// Expired auth fails the whole check from any page, so the 401 retry and Reconnect run.
+				// Other later-page failures keep earlier pages as an incomplete result (no retry).
+				if (page === 1 || pageFailure.reason === 'unauthenticated') {
 					return fail(pageFailure.reason, pageFailure.detail);
 				}
 				log(copy.log.checkPageFailed(page, pageFailure.reason, pageFailure.detail));
@@ -287,6 +335,12 @@ export async function runCheck(input: RunCheckInput): Promise<CheckResult> {
 			if (!normalized) {
 				// data + errors with no readable search: partial, nothing more to page through.
 				break;
+			}
+			if (!searchCapped && normalized.issueCount !== undefined && normalized.issueCount > SEARCH_RESULT_CAP) {
+				// Search returns at most 1000 results, so the rest can never be fetched.
+				searchCapped = true;
+				complete = false;
+				log(copy.log.checkSearchCapped(normalized.issueCount));
 			}
 			if (normalized.skipped > 0) {
 				complete = false;

@@ -68,3 +68,43 @@ for (const [name, raw] of malformed) {
 		assert.ok(result.malformed!.length > 0);
 	});
 }
+
+// Review fix: stored timestamps and lastFailure must be usable before rendering formats them.
+const acct = (extra: Record<string, unknown>) => ({ schemaVersion: 1, accounts: { Y: { ...v1.accounts.Y, ...extra } } });
+const badAccountFields: Array<[string, unknown]> = [];
+for (const field of ['lastSuccessAt', 'lastAttemptAt', 'lastAppliedFetchStartedAt', 'lastIncompleteFetchStartedAt']) {
+	badAccountFields.push(
+		[`${field} is a string`, acct({ [field]: 'x' })],
+		[`${field} is Infinity`, acct({ [field]: Infinity })],
+		[`${field} is NaN`, acct({ [field]: NaN })],
+		[`${field} is beyond Date's range`, acct({ [field]: 8.64e15 + 1 })],
+		[`${field} is below Date's range`, acct({ [field]: -8.64e15 - 1 })],
+	);
+}
+badAccountFields.push(
+	['lastFailure is not an object', acct({ lastFailure: 'network' })],
+	['lastFailure is null', acct({ lastFailure: null })],
+	['lastFailure.at is a string', acct({ lastFailure: { at: 'x', reason: 'network' } })],
+	['lastFailure.at is out of range', acct({ lastFailure: { at: 1e16, reason: 'network' } })],
+	['lastFailure.reason is unknown', acct({ lastFailure: { at: 9, reason: 'teapot' } })],
+	['lastFailure.reason is missing', acct({ lastFailure: { at: 9 } })],
+);
+
+for (const [name, raw] of badAccountFields) {
+	test(`malformed account field (${name}) is empty v1 with a named problem`, () => {
+		const result = migrate(raw);
+		assert.ok(!result.readOnly);
+		assert.deepEqual(result.stored, emptyStored());
+		assert.match(result.malformed ?? '', /invalid (lastSuccessAt|lastAttemptAt|lastAppliedFetchStartedAt|lastIncompleteFetchStartedAt|lastFailure)/);
+	});
+}
+
+test('valid timestamps at the edge of Date range and every failure reason are accepted', () => {
+	for (const reason of ['signed_out', 'unauthenticated', 'network', 'rate_limited', 'graphql_error']) {
+		const raw = acct({ lastAttemptAt: 8.64e15, lastIncompleteFetchStartedAt: -8.64e15, lastFailure: { at: 9, reason } });
+		const result = migrate(raw);
+		assert.ok(!result.readOnly);
+		assert.equal(result.malformed, undefined);
+		assert.equal(result.stored, raw);
+	}
+});

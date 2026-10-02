@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+	DEFAULT_TIMEOUT_MS,
 	GRAPHQL_ENDPOINT,
 	normalizePage,
 	runCheck,
@@ -328,3 +329,139 @@ test('src/shell/github.ts imports no vscode', () => {
 	const source = readFileSync(join(process.cwd(), 'src', 'shell', 'github.ts'), 'utf8');
 	assert.doesNotMatch(source, /from\s+['"]vscode['"]|require\(\s*['"]vscode['"]\s*\)/);
 });
+
+// ---------------------------------------------------------------------------
+// Review fixes: uncertain results are incomplete or failures.
+
+function searchPage(nodes: unknown[], search: Record<string, unknown>) {
+	return { data: { viewer: { login: VIEWER }, search: { nodes, ...search } } };
+}
+
+for (const [name, pageInfo] of [
+	['pageInfo: {}', {}],
+	['hasNextPage: "false"', { hasNextPage: 'false', endCursor: null }],
+	['hasNextPage: null', { hasNextPage: null, endCursor: null }],
+] as const) {
+	test(`bad pagination (${name}) on page 1 → graphql_error failure`, async () => {
+		const { result, lines } = await check([res(200, searchPage([pr({ n: 1 })], { pageInfo }))]);
+		assert.deepEqual(result, { ok: false, accountId: 'acct-1', fetchStartedAt: STARTED, reason: 'graphql_error' });
+		assertLogSafe(lines);
+	});
+
+	test(`bad pagination (${name}) on page 2 → ok, incomplete, page-1 items`, async () => {
+		const { result, calls } = await check([res(200, page([pr({ n: 1 })], true, 'C1')), res(200, searchPage([pr({ n: 2 })], { pageInfo }))]);
+		const r = ok(result);
+		assert.equal(r.complete, false);
+		assert.deepEqual(
+			r.items.map((i) => i.number),
+			[1],
+		);
+		assert.equal(calls.length, 2);
+	});
+}
+
+test('normalizePage rejects a non-boolean hasNextPage', () => {
+	assert.equal(normalizePage(searchPage([], { pageInfo: {} }), VIEWER), undefined);
+	assert.equal(normalizePage(searchPage([], { pageInfo: { hasNextPage: 1 } }), VIEWER), undefined);
+	assert.ok(normalizePage(searchPage([], { pageInfo: { hasNextPage: false } }), VIEWER));
+});
+
+const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
+
+async function checkWith(fetch: FetchLike, timeoutMs = 20) {
+	const lines: string[] = [];
+	const result = await runCheck({ fetch, token: TOKEN, accountId: 'acct-1', fetchStartedAt: STARTED, log: (l) => lines.push(l), timeoutMs });
+	return { result, lines };
+}
+
+test('stalled fetch on page 1 → network failure after the timeout; the request was given an abort signal that fires', async () => {
+	let signal: AbortSignal | undefined;
+	const { result, lines } = await checkWith(async (_url, init) => {
+		signal = init.signal;
+		return never();
+	});
+	assert.deepEqual(result, { ok: false, accountId: 'acct-1', fetchStartedAt: STARTED, reason: 'network' });
+	assert.ok(signal, 'signal passed to fetch');
+	assert.equal(signal.aborted, true, 'signal aborted on timeout');
+	assert.ok(lines.some((l) => /network/.test(l) && /timed out/.test(l)));
+	assertLogSafe(lines);
+});
+
+test('stalled body read on page 1 → network failure after the timeout', async () => {
+	const stalledBody: ResponseLike = { ...res(200, page([pr({ n: 1 })])), text: () => never() };
+	const { result } = await checkWith(async () => stalledBody);
+	assert.deepEqual(result, { ok: false, accountId: 'acct-1', fetchStartedAt: STARTED, reason: 'network' });
+});
+
+test('stalled later page → ok, incomplete, earlier pages kept', async () => {
+	const replies = [res(200, page([pr({ n: 1 })], true, 'C1'))];
+	const { result, lines } = await checkWith(async () => replies.shift() ?? never());
+	const r = ok(result);
+	assert.equal(r.complete, false);
+	assert.equal(r.items.length, 1);
+	assert.ok(lines.some((l) => /Page 2 failed \(network/.test(l)));
+});
+
+test('a fast response clears its timer: the signal is never aborted after a successful check', async () => {
+	let signal: AbortSignal | undefined;
+	const { result } = await checkWith(async (_url, init) => {
+		signal = init.signal;
+		return res(200, page([pr({ n: 1 })]));
+	}, 20);
+	assert.equal(ok(result).complete, true);
+	await new Promise((resolve) => setTimeout(resolve, 60));
+	assert.ok(signal);
+	assert.equal(signal.aborted, false, 'timer cleared, so it never aborted');
+});
+
+test('the production default timeout is 30 s', () => {
+	assert.equal(DEFAULT_TIMEOUT_MS, 30_000);
+});
+
+test('without timeoutMs, a response after ~50 ms completes (default timeout applies)', async () => {
+	const lines: string[] = [];
+	const result = await runCheck({
+		fetch: async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			return res(200, page([pr({ n: 1 })]));
+		},
+		token: TOKEN,
+		accountId: 'acct-1',
+		fetchStartedAt: STARTED,
+		log: (l) => lines.push(l),
+	});
+	assert.equal(ok(result).complete, true);
+});
+
+test('later-page HTTP 401 → ok:false unauthenticated, so the retry and Reconnect run', async () => {
+	const { result, lines } = await check([res(200, page([pr({ n: 1 })], true, 'C1')), res(401, { message: 'Bad credentials' })]);
+	assert.deepEqual(result, { ok: false, accountId: 'acct-1', fetchStartedAt: STARTED, reason: 'unauthenticated' });
+	assertLogSafe(lines);
+});
+
+test('search cap: issueCount > 1000 → complete:false with a log line', async () => {
+	const { result, calls, lines } = await check([res(200, searchPage([pr({ n: 1 })], { issueCount: 1001, pageInfo: { hasNextPage: false, endCursor: null } }))]);
+	const r = ok(result);
+	assert.equal(r.complete, false);
+	assert.equal(r.items.length, 1);
+	assert.match(calls[0].body.query, /issueCount/);
+	assert.equal(lines.filter((l) => /matched 1001 results but returns at most 1000/.test(l)).length, 1);
+	assertLogSafe(lines);
+});
+
+for (const [name, issueCount] of [
+	['exactly 1000', 1000],
+	['absent', undefined],
+	['non-numeric', '5000'],
+	['null', null],
+] as const) {
+	test(`search cap: issueCount ${name} is not capped`, async () => {
+		const search: Record<string, unknown> = { pageInfo: { hasNextPage: false, endCursor: null } };
+		if (issueCount !== undefined) {
+			search.issueCount = issueCount;
+		}
+		const { result, lines } = await check([res(200, searchPage([pr({ n: 1 })], search))]);
+		assert.equal(ok(result).complete, true);
+		assert.ok(!lines.some((l) => /returns at most 1000/.test(l)));
+	});
+}
