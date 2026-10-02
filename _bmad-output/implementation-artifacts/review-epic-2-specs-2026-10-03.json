@@ -1,0 +1,191 @@
+[
+  {
+    "lens": "adversarial",
+    "location": "spec-2-1-get-one-useful-alert-for-a-new-request.md — Shell wiring; Story 2.3 queueViewed",
+    "trigger_condition": "Activation invokes focus and visibility transitions before silent account lookup resolves.",
+    "guard_snippet": "After account lookup settles or changes accounts, invoke windowFocused if focused and queueViewed if visible; test persisted pending alerts at startup.",
+    "potential_consequence": "Pending alerts await a later poll/focus change; the visible queue can retain newSignal."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-1-get-one-useful-alert-for-a-new-request.md — Shared delivery helper; Story 2.2 reminder invariants",
+    "trigger_condition": "A focused failure encounters pending backlogAlert: delivery after any result conflicts with failures never touching it.",
+    "guard_snippet": "Choose whether failure-time delivery is allowed; align helper, invariant and focused-failure tests.",
+    "potential_consequence": "Implementers must violate one of the two required behaviors."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-2-return-to-a-backlog-with-a-daily-limit.md — First connection",
+    "trigger_condition": "Repeated incomplete successes before the first complete success can repeatedly satisfy the baseline predicate.",
+    "guard_snippet": "Define first connection as result.ok && result.complete && previous.lastSuccessAt === undefined; specify partial-baseline handling.",
+    "potential_consequence": "Incomplete checks can repeatedly re-arm first-connection alerts outside the daily limit."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-2-return-to-a-backlog-with-a-daily-limit.md — Ongoing reminder and Delivery",
+    "trigger_condition": "A day-D pending reminder delivers on D+1, then another eligible startup on D+1 sees the recorded date D.",
+    "guard_snippet": "Specify delivery-day accounting, pass today to focus delivery if needed, and test midnight then startup.",
+    "potential_consequence": "Two aggregate notifications can appear on one local day."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-2-return-to-a-backlog-with-a-daily-limit.md — Ongoing reminder",
+    "trigger_condition": "An undelivered firstConnection alert crosses midnight and an ongoing success replaces it with firstConnection: false.",
+    "guard_snippet": "Preserve pending first-connection intent; define reminder-date advancement and test this sequence.",
+    "potential_consequence": "First-connection effect metadata is overwritten before delivery."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-2-return-to-a-backlog-with-a-daily-limit.md — startupReminderDue",
+    "trigger_condition": "An ok mutate resolves after rule-1 rejection, rule-4 ignored result or read-only operation; the shell clears the flag.",
+    "guard_snippet": "Expose whether an eligible success applied and clear the flag only on that outcome.",
+    "potential_consequence": "A startup reminder is consumed before the intended account's queue is evaluated."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-1-get-one-useful-alert-for-a-new-request.md — Notifier behaviour and Store effects",
+    "trigger_condition": "showMessage throws or rejects after alert: shown has been persisted.",
+    "guard_snippet": "Specify submission-failure semantics; catch sync/async failures without blocking; decide whether failed submission retries or is consumed.",
+    "potential_consequence": "The only alert can be permanently lost and a rejection can escape the notifier."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-1-get-one-useful-alert-for-a-new-request.md — Store effects and createNotifier",
+    "trigger_condition": "The active account changes during memento.update; the notifier resolves item-only effects using the current account.",
+    "guard_snippet": "Bind effect execution to the originating account or carry accountId with the snapshot; test account switch during deferred write.",
+    "potential_consequence": "The alert is skipped or composed from the wrong partition while its source remains shown."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-3-read-queue-state-at-a-glance.md — Corgi placement and Rendering",
+    "trigger_condition": "Mascot changes without PR-row changes, but QueueView currently refreshes its provider only when rows differ.",
+    "guard_snippet": "Refresh for status-row presence, label or icon changes; test mascot-only transitions.",
+    "potential_consequence": "Corgi artwork and text remain stale despite a correct view model."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-4-package-and-technically-dogfood-the-calm-mvp.md — Dogfood checklist",
+    "trigger_condition": "Partial errors, revoked sign-in or 50-item scenarios lack reproducible setup or a fixture-build procedure.",
+    "guard_snippet": "Provide prerequisites and repeatable triggers, including fixture-build steps and their relation to the release artifact.",
+    "potential_consequence": "Installed-build evidence cannot be completed consistently or compared with the release candidate."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-5-validate-the-experience-with-developers.md — Protocol Task 2",
+    "trigger_condition": "A review arrives during ten-minute observation with the default fifteen-minute polling interval plus jitter.",
+    "guard_snippet": "Specify request/check scheduling and observation duration guaranteeing an ordinary eligible poll; distinguish delivery failure from non-noticing.",
+    "potential_consequence": "Usability evidence measures an alert that had no opportunity to appear."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-6-publish-pulley-with-a-support-path.md — Entry gate",
+    "trigger_condition": "Usability records No-go or unresolved fix-before-2.6 issues, but all failures are triaged.",
+    "guard_snippet": "Require affirmative usability release approval and verified closure of all fix-before-2.6 issues.",
+    "potential_consequence": "Release preparation proceeds against failed validation or unresolved blocking fixes."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-6-publish-pulley-with-a-support-path.md — Release identity",
+    "trigger_condition": "Packaged icon, preview metadata or README changes after dogfood, but version-bump condition mentions only dogfood code fixes.",
+    "guard_snippet": "Apply artifact-identity rules to all packaged changes, or explicitly scope same-version guarantees to the final candidate.",
+    "potential_consequence": "Different VSIX artifacts share 0.1.0, contradicting the tested-bits guarantee."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-6-publish-pulley-with-a-support-path.md — Release procedure steps 1 and 5",
+    "trigger_condition": "Step 1 requires CI on the tagged commit, but step 5 creates the tag.",
+    "guard_snippet": "Verify CI on the identified release commit, then tag that exact commit; alternatively tag before verification.",
+    "potential_consequence": "The release procedure blocks or requires improvisation about the verified commit."
+  },
+  {
+    "lens": "adversarial",
+    "location": "spec-2-6-publish-pulley-with-a-support-path.md — Privacy guard test",
+    "trigger_condition": "Dynamic endpoints or sensitive values aliased through reason/detail/url evade literal and parameter-name scans.",
+    "guard_snippet": "Add injected-fetch destination assertions and runtime log tests with sentinel tokens/titles through errors and rejected URLs.",
+    "potential_consequence": "The privacy guard passes while unapproved network calls or sensitive logs remain possible."
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-1-get-one-useful-alert-for-a-new-request.md:32",
+    "trigger_condition": "Two windows read pending state before either window's write becomes visible.",
+    "guard_snippet": "Serialize read-transition-write across windows, with one owner for notification delivery.",
+    "potential_consequence": "A stale write restores pending alerts, allowing duplicate notifications after focus changes.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-2-return-to-a-backlog-with-a-daily-limit.md:29-35",
+    "trigger_condition": "A focused failure or rule-4 no-op encounters a pending backlog reminder.",
+    "guard_snippet": "Specify whether delivery bypasses the failure/no-op invariants; guard deliverPending accordingly.",
+    "potential_consequence": "The unconditional delivery helper changes reminder state despite explicit failure and no-op prohibitions.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-2-return-to-a-backlog-with-a-daily-limit.md:27-35",
+    "trigger_condition": "Yesterday's pending reminder is delivered today, followed by another startup today.",
+    "guard_snippet": "Record the actual delivery date and suppress further aggregate delivery on that date.",
+    "potential_consequence": "Two aggregate notifications appear on one local day despite the daily limit.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-2-return-to-a-backlog-with-a-daily-limit.md:26",
+    "trigger_condition": "The first successful ok mutate applies an incomplete startup result.",
+    "guard_snippet": "Keep startupReminderDue until a complete applied success, or explicitly specify partial-result reminder behavior.",
+    "potential_consequence": "An empty partial result consumes the startup reminder before existing requests are recovered.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-3-read-queue-state-at-a-glance.md:41",
+    "trigger_condition": "A new request arrives while the queue is already visible.",
+    "guard_snippet": "Apply queueViewed after rendering new rows when treeView.visible is already true.",
+    "potential_consequence": "A viewed request retains the new mascot until another poll or visibility change.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-5-validate-the-experience-with-developers.md:28",
+    "trigger_condition": "Task 2 starts just after a poll with the default fifteen-minute interval.",
+    "guard_snippet": "Set a documented test interval and request timing that guarantees notification delivery during observation.",
+    "potential_consequence": "The ten-minute session ends before notification delivery, invalidating intrusiveness and noticing measurements.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "location": "_bmad-output/implementation-artifacts/spec-2-6-publish-pulley-with-a-support-path.md:27-33",
+    "trigger_condition": "Usability results record No-go with all failures triaged.",
+    "guard_snippet": "Require an affirmative usability release decision and closure of every fix-before-2.6 issue.",
+    "potential_consequence": "Release preparation proceeds despite failed validation or unresolved release-blocking fixes.",
+    "lens": "edge-case-hunter"
+  },
+  {
+    "lens": "structure",
+    "Pass": "structure",
+    "Original Text": "Story 2.1 §Design Notes: Why a baseline predicate instead of firstCheckDone (55 body words), after three empty log sections.",
+    "Revised Text": "MOVE unchanged rationale immediately before §Code Map, outside the frozen block.",
+    "Changes": "Defines the AD-7 deviation before implementation mapping. Moves 55 words; saves 0."
+  },
+  {
+    "lens": "structure",
+    "Pass": "structure",
+    "Original Text": "Stories 2.1–2.6: constraints, matrices, tasks/acceptance and verification.",
+    "Revised Text": "PRESERVE separate sections.",
+    "Changes": "Different purposes: define, illustrate, assign, validate. Saves 0 words."
+  },
+  {
+    "lens": "structure",
+    "Pass": "structure",
+    "Original Text": "Stories 2.1–2.6: empty Implementation Notes, Spec Change Log and Review Triage Log.",
+    "Revised Text": "PRESERVE template scaffolding.",
+    "Changes": "Reserved implementation and review records; bodies contain 0 words. Saves 0."
+  },
+  {
+    "lens": "prose",
+    "Pass": "prose",
+    "Original Text": "Stories 2.1–2.6 §Verification: Manual checks (if no CLI):",
+    "Revised Text": "Manual checks:",
+    "Changes": "Human validation and Marketplace checks remain necessary when CLI verification is available."
+  },
+  {
+    "lens": "prose",
+    "Pass": "prose",
+    "Original Text": "Story 2.1 matrix: Still pending — X shown, later polls, reloads, or a second window.",
+    "Revised Text": "Scenario label: Already shown",
+    "Changes": "Aligns the label with delivered alert state."
+  }
+]

@@ -26,3 +26,10 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-review-fixes.md`
   summary: Once `activate` has an injection seam, smoke-test that a rejected `store.mutate` in `applyResult` renders stale with Refresh and the write-failure message, and that the flag clears after the next successful save or an account switch.
   evidence: Review of the epic 1 fix-up found that removing `writeFailed = true`, its reset, or its pass-through in `render` passes every test; only the pure viewModel branch is tested.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-spec-review-fixes.md`
+  summary: Story 2.6 can publish code that was never dogfooded or usability-tested, because fix-before-2.6 changes land after the 0.1.0 dogfood build and only a smoke install guards the 0.1.1 release.
+  evidence: Epic 2 spec review loop (B10/B2-13). The original 2.6 already allowed post-dogfood fixes; consider re-running the notification and reminder dogfood rows on the release SHA.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-spec-review-fixes.md`
+  summary: The Story 2.4 dogfood checklist has no scenarios for a next-day startup reminder, a gap reminder, unfocused-then-focus delivery, the Open Pull Request / Open Review Queue buttons, or a pending alert at startup.
+  evidence: Epic 2 spec review loop (B2-10b). These behaviors are specified in 2.1 and 2.2 but are never exercised on an installed build.
