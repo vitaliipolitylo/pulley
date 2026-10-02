@@ -6,6 +6,8 @@ export const copy = {
 	viewContainerTitle: 'Pulley',
 	queueViewName: 'Review Queue',
 	connectCommandTitle: 'Connect to GitHub',
+	openPullRequestCommandTitle: 'Open Pull Request',
+	debugSeedCommandTitle: 'Debug Seed',
 	outputChannelName: 'Pulley',
 
 	checkingConnection: 'Checking GitHub connection…',
@@ -21,6 +23,25 @@ export const copy = {
 	failed: "Couldn't check GitHub.",
 	stale: "Couldn't check GitHub. Showing the last known requests.",
 	updatePulley: 'This data was saved by a newer version of Pulley. Update Pulley to see your review queue.',
+
+	// Request age phrases (Story 1.4). Formatted only in viewModel, from `now - requestedAt`.
+	requestedJustNow: 'Requested just now',
+	requestedMinutesAgo: (m: number): string => `Requested ${m}m ago`,
+	requestedHoursAgo: (h: number): string => `Requested ${h}h ago`,
+	requestedYesterday: 'Requested yesterday',
+	requestedDaysAgo: (d: number): string => `Requested ${d}d ago`,
+	requestTimeUnavailable: 'Request time unavailable',
+	/** Row description, following the pending mock: `owner/name · author · {age}`. */
+	rowDescription: (repo: string, author: string, age: string): string => `${repo} · ${author} · ${age}`,
+	/** Full row text for screen readers, exposed even when the row is visually truncated. */
+	rowAccessibleLabel: (repo: string, number: number, title: string, author: string, age: string): string =>
+		`${repo}#${number}, ${title}, by ${author}, ${age}`,
+	/** Full row text for the hover, one fact per line (plain text; the shell escapes it). */
+	rowTooltip: (repo: string, number: number, title: string, author: string, age: string): string =>
+		`${repo}#${number}\n${title}\nby ${author}\n${age}`,
+
+	debugSeedNeedsConnection: 'Connect to GitHub before running Pulley: Debug Seed. Seeded rows go into the active account.',
+	debugSeedDone: (n: number): string => `Pulley seeded ${n} synthetic review requests. The next complete check replaces them.`,
 
 	log: {
 		connectStarted: 'Connect requested.',
@@ -47,6 +68,10 @@ export const copy = {
 			`Stored state is malformed (${problem}); it will be replaced with empty state on the next write.`,
 		listenerFailed: (reason: string): string => `Re-render after a state change failed: ${reason}`,
 		stateWriteFailed: (reason: string): string => `Applying a check result failed: ${reason}`,
+		openIgnored: (url: string): string => `Open Pull Request ignored: not a https://github.com/ URL (${url}).`,
+		openFailed: (reason: string): string => `Opening the pull request failed: ${reason}`,
+		debugSeeded: (n: number): string => `Debug seed wrote ${n} synthetic items.`,
+		debugSeedFailed: (reason: string): string => `Debug seed failed: ${reason}`,
 	},
 } as const;
 

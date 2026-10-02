@@ -10,3 +10,6 @@
 - source_spec: `D:\projects\Pulley\_bmad-output\implementation-artifacts\spec-1-3-keep-the-queue-accurate-across-checks.md`
   summary: Confirm in a live two-window run whether `store.mutate`'s whole-value write to `pulley.state.v1` can drop another window's write, and narrow the storage layout if it does.
   evidence: Unverified (maybe-false; medium if true). Read→transition→`update` is synchronous within a window, so loss depends on how quickly another window's `globalState` cache sees a write. `docs/spikes/live-query.md` has the run steps.
+- source_spec: `D:\projects\Pulley\_bmad-output\implementation-artifacts\spec-1-4-understand-and-open-a-waiting-review.md`
+  summary: Move the `pulley.debugSeed` handler body out of `src/extension.ts` into a testable `src/shell` function and smoke-test its connection guard and its seed of 50 items into the active account.
+  evidence: Flipping the `connection.kind !== 'connected'` guard, passing `activeAccountId: undefined`, or dropping the `setContext('pulley.development')` call passes every test today. The smoke host runs in Test mode, where the command isn't registered.

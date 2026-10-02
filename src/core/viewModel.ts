@@ -14,23 +14,48 @@ export interface WindowView {
 }
 
 export interface ViewModelCtx {
-	/** Epoch ms. Reserved for age strings (Story 1.4). */
+	/** Epoch ms, read in the shell. Used for request-age strings. */
 	now: number;
 }
 
-/** Row description: `owner/name#number · author` (1.2 format). */
-function rowDescription(item: Tracked): string {
-	return `${item.repo}#${item.number} · ${item.author}`;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/**
+ * The request-age phrase from `now - requestedAt`. Without `requestedAt` it says
+ * "Request time unavailable"; `firstSeenAt`, PR age, and author are never substitutes.
+ * A future `requestedAt` (clock skew) reads as "just now".
+ */
+export function formatRequestAge(now: number, requestedAt?: number): string {
+	if (requestedAt === undefined || !Number.isFinite(requestedAt)) {
+		return copy.requestTimeUnavailable;
+	}
+	const elapsed = now - requestedAt;
+	if (elapsed < MINUTE) {
+		return copy.requestedJustNow;
+	}
+	if (elapsed < HOUR) {
+		return copy.requestedMinutesAgo(Math.floor(elapsed / MINUTE));
+	}
+	if (elapsed < DAY) {
+		return copy.requestedHoursAgo(Math.floor(elapsed / HOUR));
+	}
+	if (elapsed < 2 * DAY) {
+		return copy.requestedYesterday;
+	}
+	return copy.requestedDaysAgo(Math.floor(elapsed / DAY));
 }
 
-function toRow(item: Tracked): Row {
-	const description = rowDescription(item);
+function toRow(item: Tracked, now: number): Row {
+	const age = formatRequestAge(now, item.requestedAt);
 	return {
 		id: item.id,
 		label: item.title,
-		description,
-		tooltip: `${item.title}\n${description}`,
-		accessibleLabel: `${item.title}, ${description}`,
+		description: copy.rowDescription(item.repo, item.author, age),
+		age,
+		tooltip: copy.rowTooltip(item.repo, item.number, item.title, item.author, age),
+		accessibleLabel: copy.rowAccessibleLabel(item.repo, item.number, item.title, item.author, age),
 		url: item.url,
 	};
 }
@@ -45,7 +70,7 @@ function byAge(a: Tracked, b: Tracked): number {
 	return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-export function viewModel(stored: Stored | undefined, window: WindowView, _ctx: ViewModelCtx): ViewModel {
+export function viewModel(stored: Stored | undefined, window: WindowView, ctx: ViewModelCtx): ViewModel {
 	if (window.readOnly || !stored) {
 		return { status: 'readOnly', count: null, message: copy.updatePulley, rows: [] };
 	}
@@ -64,7 +89,7 @@ export function viewModel(stored: Stored | undefined, window: WindowView, _ctx: 
 		return { status: 'loading', count: null, message: copy.checking, rows: [] };
 	}
 
-	const rows = Object.values(account.items).sort(byAge).map(toRow);
+	const rows = Object.values(account.items).sort(byAge).map((item) => toRow(item, ctx.now));
 	const n = rows.length;
 	const count = account.lastSuccessAt === undefined ? null : n;
 

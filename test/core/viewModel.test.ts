@@ -4,7 +4,7 @@ import { copy } from '../../src/core/copy.ts';
 import type { ConnectionState } from '../../src/core/connection.ts';
 import { emptyAccount } from '../../src/core/reconcile.ts';
 import type { Account, Stored, Tracked } from '../../src/core/types.ts';
-import { viewModel, type WindowView } from '../../src/core/viewModel.ts';
+import { formatRequestAge, viewModel, type WindowView } from '../../src/core/viewModel.ts';
 
 const NOW = 100_000;
 const connected: ConnectionState = { kind: 'connected', accountId: 'Y', label: 'octocat' };
@@ -79,9 +79,10 @@ test('pending after a complete success: count and firm message', () => {
 	assert.deepEqual(m.rows[0], {
 		id: 'A',
 		label: 'Fix A',
-		description: 'octo/app#7 · alice',
-		tooltip: 'Fix A\nocto/app#7 · alice',
-		accessibleLabel: 'Fix A, octo/app#7 · alice',
+		description: 'octo/app · alice · Request time unavailable',
+		age: 'Request time unavailable',
+		tooltip: 'octo/app#7\nFix A\nby alice\nRequest time unavailable',
+		accessibleLabel: 'octo/app#7, Fix A, by alice, Request time unavailable',
 		url: 'https://github.com/octo/app/pull/A',
 	});
 });
@@ -187,4 +188,77 @@ test('inputs are not mutated', () => {
 	viewModel(deepFreeze(stored), deepFreeze(w), deepFreeze({ now: NOW }));
 	assert.deepEqual(stored, before);
 	assert.deepEqual(Object.keys(stored.accounts.Y.items), ['b', 'a']);
+});
+
+// ---------------------------------------------------------------------------
+// Story 1.4: request age and accessible label.
+// ---------------------------------------------------------------------------
+
+const SEC = 1000;
+const MIN = 60 * SEC;
+const HR = 60 * MIN;
+const T = 1_000 * 24 * HR; // a "now" far from zero
+
+const ageCases: Array<[name: string, requestedAt: number | undefined, expected: string]> = [
+	['known time: now − 2 h', T - 2 * HR, 'Requested 2h ago'],
+	['unknown time', undefined, 'Request time unavailable'],
+	['exactly now', T, 'Requested just now'],
+	['boundary 59 s', T - 59 * SEC, 'Requested just now'],
+	['boundary 1 min', T - MIN, 'Requested 1m ago'],
+	['boundary 59 m', T - 59 * MIN, 'Requested 59m ago'],
+	['boundary 59 m 59 s', T - 59 * MIN - 59 * SEC, 'Requested 59m ago'],
+	['boundary 1 h', T - HR, 'Requested 1h ago'],
+	['boundary 23 h 59 m', T - 23 * HR - 59 * MIN, 'Requested 23h ago'],
+	['boundary 24 h', T - 24 * HR, 'Requested yesterday'],
+	['boundary 47 h', T - 47 * HR, 'Requested yesterday'],
+	['boundary 47 h 59 m', T - 47 * HR - 59 * MIN, 'Requested yesterday'],
+	['boundary 48 h', T - 48 * HR, 'Requested 2d ago'],
+	['10 days 5 h', T - 10 * 24 * HR - 5 * HR, 'Requested 10d ago'],
+	['future time (clock skew)', T + 5 * MIN, 'Requested just now'],
+];
+
+for (const [name, requestedAt, expected] of ageCases) {
+	test(`formatRequestAge: ${name} → "${expected}"`, () => {
+		assert.equal(formatRequestAge(T, requestedAt), expected);
+	});
+}
+
+test('row age matrix: description, tooltip, and accessible label end with the age phrase', () => {
+	for (const [name, requestedAt, expected] of ageCases) {
+		const item = tracked('A', 1, requestedAt === undefined ? {} : { requestedAt });
+		const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(item) }), win(), { now: T });
+		const row = m.rows[0];
+		assert.equal(row.age, expected, name);
+		assert.ok(row.description.endsWith(` · ${expected}`), name);
+		assert.ok(row.accessibleLabel.endsWith(`, ${expected}`), name);
+		assert.ok(row.tooltip.endsWith(`\n${expected}`), name);
+	}
+});
+
+test('known time: description is "owner/name · author · Requested 2h ago"', () => {
+	const item = tracked('A', 1, { requestedAt: T - 2 * HR });
+	const row = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(item) }), win(), { now: T }).rows[0];
+	assert.equal(row.label, 'Fix A');
+	assert.equal(row.description, 'octo/app · alice · Requested 2h ago');
+});
+
+test('unknown time: "Request time unavailable" in the description and the accessible label, never firstSeenAt', () => {
+	// firstSeenAt is 2 h before now; it must not be used as a substitute.
+	const item = tracked('A', T - 2 * HR);
+	const row = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(item) }), win(), { now: T }).rows[0];
+	assert.equal(row.description, 'octo/app · alice · Request time unavailable');
+	assert.equal(row.accessibleLabel, 'octo/app#7, Fix A, by alice, Request time unavailable');
+	assert.doesNotMatch(`${row.description} ${row.accessibleLabel} ${row.tooltip}`, /2h|ago/);
+});
+
+test('long title and repository: tooltip and accessible label carry the full text', () => {
+	const repo = 'very-long-organization-name/an-equally-long-repository-name-for-truncation';
+	const title = 'Refactor the scheduler so that overlapping checks join the in-flight one instead of starting a second request';
+	const author = 'a-contributor-with-a-long-login';
+	const item = tracked('A', 1, { repo, number: 12345, title, author, requestedAt: T - 30 * HR });
+	const row = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(item) }), win(), { now: T }).rows[0];
+	assert.equal(row.label, title);
+	assert.equal(row.description, `${repo} · ${author} · Requested yesterday`);
+	assert.equal(row.accessibleLabel, `${repo}#12345, ${title}, by ${author}, Requested yesterday`);
+	assert.equal(row.tooltip, `${repo}#12345\n${title}\nby ${author}\nRequested yesterday`);
 });

@@ -104,9 +104,13 @@ export interface Row {
 	id: string;
 	/** Tree item label: the PR title. */
 	label: string;
-	/** `owner/name#number · author`. */
+	/** `owner/name · author · {age}` (pending mock). */
 	description: string;
+	/** "Requested 2h ago", …, or "Request time unavailable". */
+	age: string;
+	/** Plain-text hover lines: `owner/name#number`, title, "by {author}", age. */
 	tooltip: string;
+	/** Full row text for screen readers: `owner/name#number`, title, "by {author}", age. */
 	accessibleLabel: string;
 	url: string;
 }

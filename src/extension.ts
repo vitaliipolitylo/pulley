@@ -7,13 +7,19 @@ import { viewModel } from './core/viewModel.ts';
 import { connect, getToken, lookupSilently, onGitHubSessionsChanged } from './shell/auth.ts';
 import { checkWithRetry } from './shell/checkWithRetry.ts';
 import { runCheck } from './shell/github.ts';
-import { QueueView } from './shell/queueView.ts';
-import { createStore } from './shell/store.ts';
+import { OPEN_PULL_REQUEST_COMMAND, openPullRequest, QueueView } from './shell/queueView.ts';
+import { createStore, type Store } from './shell/store.ts';
+import { FIFTY, fiftyResult } from '../test/smoke/fixtures/fifty.ts';
 
 /** Check interval until Story 1.5 adds the `pulley.checkIntervalMinutes` setting. */
 const INTERVAL_MS = 15 * 60 * 1000;
 
-export function activate(context: vscode.ExtensionContext): void {
+/** Returned from `activate` only in Test mode, so smoke tests can seed and read stored state. */
+export interface PulleyTestApi {
+	store: Store;
+}
+
+export function activate(context: vscode.ExtensionContext): PulleyTestApi | undefined {
 	const output = vscode.window.createOutputChannel(copy.outputChannelName);
 	const log = (line: string): void => output.appendLine(`[${new Date().toISOString()}] ${line}`);
 	const view = new QueueView();
@@ -98,9 +104,43 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('pulley.connect', () => apply(connect(log))),
 		onGitHubSessionsChanged(() => void apply(lookupSilently(log))),
+		// Bound as each row's TreeItem.command (click and Enter). `vscode.env.openExternal` is read
+		// per call so smoke tests can stub it. Opening changes no stored state.
+		vscode.commands.registerCommand(OPEN_PULL_REQUEST_COMMAND, (row: unknown) =>
+			openPullRequest(row, (uri) => vscode.env.openExternal(uri), log),
+		),
 	);
 
+	if (context.extensionMode === vscode.ExtensionMode.Development) {
+		// Prototype checks (Story 1.4): fifty synthetic rows in the active account, written as a
+		// complete check through the single write path. The next real check replaces them.
+		// Shows the command in the palette only here (package.json menus.commandPalette).
+		void vscode.commands.executeCommand('setContext', 'pulley.development', true);
+		context.subscriptions.push(
+			vscode.commands.registerCommand('pulley.debugSeed', async () => {
+				if (connection.kind !== 'connected') {
+					void vscode.window.showWarningMessage(copy.debugSeedNeedsConnection);
+					return;
+				}
+				const now = Date.now();
+				try {
+					await store.mutate(reconcile, fiftyResult(connection.accountId, now), {
+						now,
+						activeAccountId: connection.accountId,
+						intervalMs: INTERVAL_MS,
+					});
+					log(copy.log.debugSeeded(FIFTY));
+					void vscode.window.showInformationMessage(copy.debugSeedDone(FIFTY));
+				} catch (error) {
+					log(copy.log.debugSeedFailed(shortReason(error)));
+				}
+			}),
+		);
+	}
+
 	void apply(lookupSilently(log));
+
+	return context.extensionMode === vscode.ExtensionMode.Test ? { store } : undefined;
 }
 
 export function deactivate(): void {}

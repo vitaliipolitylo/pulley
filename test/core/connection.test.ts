@@ -39,6 +39,13 @@ test('package.json strings mirror copy.ts', () => {
 		pkg.contributes.commands.find((c: { command: string }) => c.command === 'pulley.connect').title,
 		copy.connectCommandTitle,
 	);
+	const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id).title;
+	assert.equal(title('pulley.openPullRequest'), copy.openPullRequestCommandTitle);
+	assert.equal(title('pulley.debugSeed'), copy.debugSeedCommandTitle);
+	assert.deepEqual(pkg.contributes.menus.commandPalette, [
+		{ command: 'pulley.openPullRequest', when: 'false' },
+		{ command: 'pulley.debugSeed', when: 'pulley.development' },
+	]);
 	assert.deepEqual(pkg.activationEvents, ['onStartupFinished']);
 });
 

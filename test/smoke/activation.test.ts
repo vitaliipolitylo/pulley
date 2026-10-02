@@ -30,5 +30,7 @@ suite('Activation', () => {
 		const commands = await vscode.commands.getCommands(true);
 		assert.ok(commands.includes('pulley.connect'));
 		assert.ok(!commands.includes('pulley.helloWorld'), 'scaffold hello-world command removed');
+		assert.ok(commands.includes('pulley.openPullRequest'));
+		assert.ok(!commands.includes('pulley.debugSeed'), 'debug seed is registered only in Development mode');
 	});
 });

@@ -28,9 +28,10 @@ function fakes() {
 const row = (n: number): Row => ({
 	id: `PR_${n}`,
 	label: `Fix ${n}`,
-	description: `octo/app#${n} · alice`,
-	tooltip: `Fix ${n}\nocto/app#${n} · alice`,
-	accessibleLabel: `Fix ${n}, octo/app#${n} · alice`,
+	description: 'octo/app · alice · Requested 2h ago',
+	age: 'Requested 2h ago',
+	tooltip: `octo/app#${n}\nFix ${n}\nby alice\nRequested 2h ago`,
+	accessibleLabel: `octo/app#${n}, Fix ${n}, by alice, Requested 2h ago`,
 	url: `https://github.com/octo/app/pull/${n}`,
 });
 const pending = (rows: Row[], message = `${rows.length} reviews are waiting.`): ViewModel => ({ status: 'pending', count: rows.length, message, rows });
@@ -43,7 +44,7 @@ suite('QueueView', () => {
 		assert.strictEqual(tree.message, undefined);
 	});
 
-	test('rows render as plain tree items with the 1.2 format', async () => {
+	test('rows render as native tree items with tooltip, accessible label, icon, and open command', async () => {
 		const { tree, context, view } = fakes();
 		await view.render(pending([row(1), row(2)]));
 		assert.deepStrictEqual(context, [['pulley.connection', 'connected']]);
@@ -53,11 +54,33 @@ suite('QueueView', () => {
 		const item = view.provider.getTreeItem(rows[0]);
 		assert.strictEqual(item.label, 'Fix 1');
 		assert.strictEqual(item.id, 'PR_1');
-		assert.strictEqual(item.description, 'octo/app#1 · alice');
-		assert.strictEqual(item.tooltip, 'Fix 1\nocto/app#1 · alice');
-		assert.deepStrictEqual(item.accessibilityInformation, { label: 'Fix 1, octo/app#1 · alice' });
+		assert.strictEqual(item.description, 'octo/app · alice · Requested 2h ago');
+		assert.ok(item.tooltip instanceof vscode.MarkdownString);
+		const tooltip = item.tooltip as vscode.MarkdownString;
+		assert.ok(!tooltip.isTrusted, 'tooltip is not trusted');
+		// appendText escapes Markdown punctuation and spaces; undo that to read the visible text.
+		const visible = tooltip.value.replace(/\\(.)/g, '$1').replace(/&nbsp;/g, ' ');
+		assert.deepStrictEqual(
+			visible.split('\n').filter((line) => line !== ''),
+			['octo/app#1', 'Fix 1', 'by alice', 'Requested 2h ago'],
+		);
+		assert.deepStrictEqual(item.accessibilityInformation, { label: 'octo/app#1, Fix 1, by alice, Requested 2h ago' });
+		assert.ok(item.iconPath instanceof vscode.ThemeIcon);
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'git-pull-request');
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).color, undefined, 'no custom color');
+		assert.strictEqual(item.command?.command, 'pulley.openPullRequest');
+		assert.deepStrictEqual(item.command?.arguments, [rows[0]]);
 		assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.None);
 		assert.deepStrictEqual(view.provider.getChildren(rows[0]), []);
+	});
+
+	test('tooltip is text only: Markdown, links, and theme icons in a title are escaped', () => {
+		const { view } = fakes();
+		const tricky: Row = { ...row(3), tooltip: 'octo/app#3\n[click](https://evil.example) **bold** $(alert)\nby alice\nRequested 2h ago' };
+		const tooltip = view.provider.getTreeItem(tricky).tooltip as vscode.MarkdownString;
+		assert.ok(!tooltip.value.includes('[click](https://evil.example)'), tooltip.value);
+		assert.ok(!tooltip.value.includes('**bold**'), tooltip.value);
+		assert.ok(!tooltip.supportThemeIcons, 'theme icons are not rendered');
 	});
 
 	test('a deep-equal model does nothing', async () => {

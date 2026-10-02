@@ -43,8 +43,30 @@
         "command": "pulley.connect",
         "title": "Connect to GitHub",
         "category": "Pulley"
+      },
+      {
+        "command": "pulley.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Pulley"
+      },
+      {
+        "command": "pulley.debugSeed",
+        "title": "Debug Seed",
+        "category": "Pulley"
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "pulley.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "pulley.debugSeed",
+          "when": "pulley.development"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
