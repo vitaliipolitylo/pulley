@@ -1,4 +1,5 @@
 // Contract types shared by core and shell (AD-5, AD-13). Erasable-only TypeScript.
+import type { UnconnectedReason } from './connection.ts';
 
 /** One outstanding direct review request, normalized from GitHub. */
 export interface RequestItem {
@@ -115,11 +116,18 @@ export interface Row {
 	url: string;
 }
 
+/** The one action offered for a failure reason (AD-11, AD-13). */
+export type FailureAction = 'connect' | 'reconnect' | 'refresh';
+
 export interface ViewModel {
 	status: ViewStatus;
-	/** Null until the account's first complete successful check. */
+	/** Why the window is unconnected; set only when `status` is `unconnected`. */
+	reason?: UnconnectedReason;
+	/** The action the state offers; set for `unconnected` and `stale`. */
+	action?: FailureAction;
+	/** Null whenever `status` is not `pending` or `clear`, and before the first complete success. */
 	count: number | null;
-	/** TreeView.message. Undefined while unconnected (the welcome content explains). */
+	/** TreeView.message. Undefined while the welcome content explains (unconnected with no rows). */
 	message?: string;
 	rows: Row[];
 }

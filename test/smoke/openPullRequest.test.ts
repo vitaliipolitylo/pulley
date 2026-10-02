@@ -46,7 +46,7 @@ suite('pulley.openPullRequest', () => {
 		assert.ok(!read.readOnly);
 		rows = viewModel(
 			read.stored,
-			{ connection: { kind: 'connected', accountId: ACCOUNT, label: 'smoke' }, readOnly: false, checking: false },
+			{ connection: { kind: 'connected', accountId: ACCOUNT, label: 'smoke', generation: 1 }, readOnly: false, checking: false },
 			{ now, formatTime: String },
 		).rows;
 		assert.strictEqual(rows.length, FIFTY, 'fifty seeded rows');

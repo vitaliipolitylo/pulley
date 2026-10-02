@@ -1,11 +1,13 @@
 // Every user-facing string Pulley shows lives here.
 // Strings that VS Code reads from package.json (view names, command titles,
 // welcome content) are mirrored there; test/core/connection.test.ts keeps them in sync.
+import type { FailureAction, FailureReason } from './types.ts';
 
 export const copy = {
 	viewContainerTitle: 'Pulley',
 	queueViewName: 'Review Queue',
 	connectCommandTitle: 'Connect to GitHub',
+	reconnectCommandTitle: 'Reconnect GitHub',
 	openPullRequestCommandTitle: 'Open Pull Request',
 	refreshCommandTitle: 'Refresh review requests',
 	checkIntervalDescription: 'How often Pulley checks GitHub for review requests, in minutes (5–240).',
@@ -17,13 +19,21 @@ export const copy = {
 		'Pulley needs access to your GitHub account to find pull requests waiting for your review. ' +
 		'Only repositories visible to this GitHub sign-in are included.',
 	connectButton: 'Connect',
+	unauthenticatedExplanation:
+		"Pulley's GitHub sign-in expired or was revoked, so the queue can't be checked. " +
+		'Only repositories visible to this GitHub sign-in are included.',
+	reconnectButton: 'Reconnect',
+	/** Shown in VS Code's sign-in prompt when Reconnect asks for a new session. */
+	reconnectDetail: "Pulley's GitHub sign-in expired or was revoked. Sign in again to check your review requests.",
 
 	checking: 'Checking review requests…',
 	pending: (n: number): string => (n === 1 ? '1 review is waiting.' : `${n} reviews are waiting.`),
 	clear: 'No reviews are waiting in repositories visible to this GitHub sign-in.',
 	incomplete: 'GitHub returned only part of the results, so this list may be incomplete.',
-	failed: "Couldn't check GitHub.",
-	stale: "Couldn't check GitHub. Showing the last known requests.",
+	/** A failure after a prior complete success: the stored rows are shown as stale. */
+	stale: (time: string): string => `Couldn't check GitHub. Showing the last known requests from ${time}.`,
+	/** A failure with no prior complete success: no count and no clear state. */
+	unavailable: "Couldn't check GitHub, so the queue is unavailable.",
 	/** Appended to the pending and clear messages once a complete check has succeeded (Story 1.5). */
 	lastChecked: (time: string): string => `Last checked ${time}`,
 	updatePulley: 'This data was saved by a newer version of Pulley. Update Pulley to see your review queue.',
@@ -55,6 +65,10 @@ export const copy = {
 		checkStarted: 'Check started.',
 		checkNoSession: 'Check skipped: no GitHub session.',
 		checkRetryAfter401: 'GitHub returned 401; retrying once with a fresh silent session lookup.',
+		checkUnauthenticated: 'GitHub returned 401 after retry; Reconnect is needed.',
+		checkDiscarded: (started: number, current: number): string =>
+			`Check result discarded: the GitHub session changed during the check (generation ${started} → ${current}).`,
+		checkGenerationGaveUp: 'The GitHub session kept changing during the check; the next trigger checks again.',
 		checkSummary: (pages: number, items: number, errors: number, complete: boolean): string =>
 			`Check finished: pages=${pages}, items=${items}, errors=${errors}, complete=${complete}.`,
 		checkFailed: (reason: string, detail: string): string => `Check failed: ${reason} (${detail}).`,
@@ -88,3 +102,24 @@ export const copy = {
 
 /** The viewsWelcome markdown shown while unconnected (mirrored in package.json). */
 export const unconnectedWelcome = `${copy.unconnectedExplanation}\n[${copy.connectButton}](command:pulley.connect)`;
+
+/** The viewsWelcome markdown shown while unauthenticated (mirrored in package.json). */
+export const unauthenticatedWelcome = `${copy.unauthenticatedExplanation}\n[${copy.reconnectButton}](command:pulley.connect)`;
+
+/** One message hint and one action per failure reason. */
+export const failureCopy: Readonly<Record<FailureReason, { hint: string; action: FailureAction }>> = {
+	signed_out: { hint: 'GitHub is not connected. Connect to check again.', action: 'connect' },
+	unauthenticated: { hint: 'The GitHub sign-in expired or was revoked. Reconnect to check again.', action: 'reconnect' },
+	network: { hint: 'GitHub could not be reached. Refresh to try again.', action: 'refresh' },
+	rate_limited: { hint: 'GitHub rate limit reached. Refresh to try again later.', action: 'refresh' },
+	graphql_error: { hint: 'GitHub returned an error. Refresh to try again.', action: 'refresh' },
+};
+
+/**
+ * The message for a failed check: stale (with the last success time) when a complete check has
+ * succeeded before, unavailable otherwise; then the reason's hint.
+ */
+export function failureMessage(reason: FailureReason, lastSuccessTime: string | undefined): string {
+	const lead = lastSuccessTime === undefined ? copy.unavailable : copy.stale(lastSuccessTime);
+	return `${lead} ${failureCopy[reason].hint}`;
+}

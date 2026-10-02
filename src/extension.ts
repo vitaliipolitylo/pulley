@@ -1,14 +1,21 @@
 import * as vscode from 'vscode';
-import { shortReason, type ConnectionState } from './core/connection.ts';
+import { activeAccountId, shortReason, type ConnectionState, type SessionLookup } from './core/connection.ts';
 import { copy } from './core/copy.ts';
 import { reconcile } from './core/reconcile.ts';
 import type { CheckResult } from './core/types.ts';
 import { viewModel } from './core/viewModel.ts';
-import { connect, getToken, lookupSilently, onGitHubSessionsChanged } from './shell/auth.ts';
-import { checkWithRetry } from './shell/checkWithRetry.ts';
+import { connect, getToken, lookupSilently, onGitHubSessionsChanged, SessionGeneration } from './shell/auth.ts';
 import { runCheck } from './shell/github.ts';
 import { OPEN_PULL_REQUEST_COMMAND, openPullRequest, QUEUE_VIEW_ID, QueueView } from './shell/queueView.ts';
-import { createIntervalReader, createScheduler, formatCheckTime, type Scheduler } from './shell/scheduler.ts';
+import {
+	connectPlan,
+	createIntervalReader,
+	createQueueCheck,
+	createScheduler,
+	formatCheckTime,
+	nextConnection,
+	type Scheduler,
+} from './shell/scheduler.ts';
 import { createStore, type Store } from './shell/store.ts';
 import { FIFTY, fiftyResult } from '../test/smoke/fixtures/fifty.ts';
 
@@ -29,10 +36,12 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	context.subscriptions.push(output, view);
 
 	// Window memory only (never persisted): the connection (and so the active account), the
-	// number of checks in flight, a ticket per lookup so a slower, older lookup cannot overwrite
-	// a newer one's connection state, and the latest silent lookup so a check waits for its
-	// account. Interactive Connect lookups never gate a check (consent can stay open forever).
+	// session generation, the number of checks in flight, a ticket per lookup so a slower, older
+	// lookup cannot overwrite a newer one's connection state, and the latest silent lookup so a
+	// check waits for its account. Interactive Connect lookups never gate a check (consent can
+	// stay open forever).
 	let connection: ConnectionState = { kind: 'unknown' };
+	const generation = new SessionGeneration();
 	let checking = 0;
 	let latestTicket = 0;
 	let latestSilentLookup: Promise<unknown> = Promise.resolve();
@@ -62,41 +71,43 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	const sub = store.onDidChange(() => void render());
 	context.subscriptions.push({ dispose: () => sub.dispose() });
 
-	/** One check with a fresh silent token; a 401 retries the silent lookup once (AD-11). */
-	const checkOnce = (): Promise<CheckResult | undefined> =>
-		checkWithRetry({
-			getToken: () => getToken(log),
-			// fetchStartedAt is read before the first request of each attempt.
-			runCheck: (token, accountId) =>
-				runCheck({ fetch: globalThis.fetch, token, accountId, fetchStartedAt: Date.now(), log }),
-			log,
-		});
-
 	/**
-	 * The scheduler's check: silent session → GitHub → store.mutate(reconcile), with the window's
-	 * `checking` flag set around it. Reconcile drops other accounts' results (rule 1) and results
-	 * older than the last applied complete check (rule 4). No session means no network call.
+	 * Applies a check result from the current session generation. No session is `signed_out`; a
+	 * 401 after the retry is `unauthenticated` and keeps the account active so its rows stay as
+	 * stale; a success for that account while unauthenticated reconnects it. Reconcile drops other
+	 * accounts' results (rule 1) and results older than the last applied complete check (rule 4).
 	 */
+	const applyResult = async (result: CheckResult | undefined): Promise<void> => {
+		const next = nextConnection(connection, result, generation.current);
+		if (next !== connection) {
+			connection = next;
+			log(copy.log.stateChanged(next.kind === 'unconnected' ? `unconnected (${next.reason})` : next.kind));
+		}
+		if (!result) {
+			return;
+		}
+		try {
+			await store.mutate(reconcile, result, { now: Date.now(), activeAccountId: activeAccountId(connection), intervalMs: getIntervalMs() });
+		} catch (error) {
+			log(copy.log.stateWriteFailed(shortReason(error)));
+		}
+	};
+
+	/** The scheduler's check, with the window's `checking` flag set around it. */
+	const queueCheck = createQueueCheck({
+		lookupsSettled: silentLookupsSettled,
+		generation: () => generation.current,
+		getToken: () => getToken(log),
+		// fetchStartedAt is read before the first request of each attempt.
+		fetchCheck: (token, accountId) => runCheck({ fetch: globalThis.fetch, token, accountId, fetchStartedAt: Date.now(), log }),
+		apply: applyResult,
+		log,
+	});
 	const runQueueCheck = async (): Promise<void> => {
-		await silentLookupsSettled();
-		const ticket = latestTicket;
 		checking++;
 		try {
 			void render();
-			const result = await checkOnce();
-			if (!result) {
-				log(copy.log.checkNoSession);
-				if (ticket === latestTicket) {
-					connection = { kind: 'unconnected' };
-				}
-				return;
-			}
-			const activeAccountId = connection.kind === 'connected' ? connection.accountId : undefined;
-			try {
-				await store.mutate(reconcile, result, { now: Date.now(), activeAccountId, intervalMs: getIntervalMs() });
-			} catch (error) {
-				log(copy.log.stateWriteFailed(shortReason(error)));
-			}
+			await queueCheck();
 		} finally {
 			checking--;
 			await render();
@@ -114,16 +125,22 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	activeScheduler = scheduler;
 	context.subscriptions.push({ dispose: () => scheduler.dispose() });
 
-	/** Applies a connection lookup; resolves to its state, or undefined when a newer lookup won. */
-	const apply = (lookup: Promise<ConnectionState>, silent: boolean): Promise<ConnectionState | undefined> => {
+	/**
+	 * Applies a connection lookup and advances the session generation, so a check started before
+	 * it is discarded. Resolves to the new state, or undefined when a newer lookup won or the
+	 * lookup asked to keep the current state.
+	 */
+	const apply = (lookup: Promise<SessionLookup | undefined>, silent: boolean): Promise<ConnectionState | undefined> => {
 		const ticket = ++latestTicket;
 		const applied = (async () => {
-			const state = await lookup;
-			if (ticket !== latestTicket) {
+			const found = await lookup;
+			if (ticket !== latestTicket || !found) {
 				return undefined;
 			}
+			const next = generation.next();
+			const state: ConnectionState = found.kind === 'connected' ? { ...found, generation: next } : found;
 			connection = state;
-			log(copy.log.stateChanged(state.kind));
+			log(copy.log.stateChanged(state.kind === 'unconnected' ? `unconnected (${state.reason})` : state.kind));
 			await render();
 			return state;
 		})();
@@ -131,6 +148,22 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			latestSilentLookup = applied;
 		}
 		return applied;
+	};
+
+	/**
+	 * Connect, or Reconnect while unauthenticated (a new session via `forceNewSession`). A cancelled
+	 * Reconnect keeps the unauthenticated state and its stale rows.
+	 */
+	const connectOrReconnect = async (): Promise<void> => {
+		const plan = connectPlan(connection);
+		await apply(connect(log, { force: plan.force }).then(plan.map), false);
+		// The sign-in fires onDidChangeSessions before connect() resolves, so a newer silent
+		// lookup may win the ticket. Wait for it, then check whichever lookup won. The user is
+		// waiting: a manual trigger skips jitter and cancels that event's jittered check.
+		await silentLookupsSettled();
+		if (connection.kind === 'connected') {
+			await scheduler.trigger('manual');
+		}
 	};
 
 	// Refresh joins an in-flight check, and the view's progress indicator wraps each in-flight
@@ -148,16 +181,8 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	void render();
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('pulley.connect', async () => {
-			await apply(connect(log), false);
-			// createIfNone fires onDidChangeSessions before connect() resolves, so a newer silent
-			// lookup may win the ticket. Wait for it, then check whichever lookup won. The user is
-			// waiting: a manual trigger skips jitter and cancels that event's jittered check.
-			await silentLookupsSettled();
-			if (connection.kind === 'connected') {
-				await scheduler.trigger('manual');
-			}
-		}),
+		vscode.commands.registerCommand('pulley.connect', connectOrReconnect),
+		vscode.commands.registerCommand('pulley.reconnect', connectOrReconnect),
 		vscode.commands.registerCommand('pulley.refresh', () => refresh()),
 		onGitHubSessionsChanged(() => {
 			void apply(lookupSilently(log), true).then((state) => (state ? scheduler.trigger('session-changed') : undefined));

@@ -36,6 +36,11 @@
         "view": "pulley.queue",
         "contents": "Pulley needs access to your GitHub account to find pull requests waiting for your review. Only repositories visible to this GitHub sign-in are included.\n[Connect](command:pulley.connect)",
         "when": "pulley.connection == unconnected"
+      },
+      {
+        "view": "pulley.queue",
+        "contents": "Pulley's GitHub sign-in expired or was revoked, so the queue can't be checked. Only repositories visible to this GitHub sign-in are included.\n[Reconnect](command:pulley.connect)",
+        "when": "pulley.connection == unauthenticated"
       }
     ],
     "commands": [
@@ -43,6 +48,12 @@
         "command": "pulley.connect",
         "title": "Connect to GitHub",
         "category": "Pulley"
+      },
+      {
+        "command": "pulley.reconnect",
+        "title": "Reconnect GitHub",
+        "category": "Pulley",
+        "icon": "$(account)"
       },
       {
         "command": "pulley.refresh",
@@ -80,12 +91,21 @@
           "command": "pulley.refresh",
           "when": "view == pulley.queue && pulley.connection == connected",
           "group": "navigation"
+        },
+        {
+          "command": "pulley.reconnect",
+          "when": "view == pulley.queue && pulley.connection == unauthenticated",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
         {
           "command": "pulley.openPullRequest",
           "when": "false"
+        },
+        {
+          "command": "pulley.reconnect",
+          "when": "pulley.connection == unauthenticated"
         },
         {
           "command": "pulley.debugSeed",

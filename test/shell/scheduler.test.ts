@@ -2,7 +2,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkWithRetry } from '../../src/shell/checkWithRetry.ts';
-import { createIntervalReader, createScheduler, formatCheckTime, JITTER_MAX_MS, type SchedulerDeps } from '../../src/shell/scheduler.ts';
+import { activeAccountId, type ConnectionState } from '../../src/core/connection.ts';
+import { reconcile } from '../../src/core/reconcile.ts';
+import type { CheckResult } from '../../src/core/types.ts';
+import { viewModel } from '../../src/core/viewModel.ts';
+import {
+	connectPlan,
+	createIntervalReader,
+	createQueueCheck,
+	createScheduler,
+	formatCheckTime,
+	JITTER_MAX_MS,
+	MAX_GENERATION_ATTEMPTS,
+	nextConnection,
+	type QueueCheckDeps,
+	type SchedulerDeps,
+} from '../../src/shell/scheduler.ts';
 
 interface FakeTimer {
 	id: number;
@@ -291,4 +306,194 @@ test('formatCheckTime: same local day → short time only; previous day or acros
 		assert.equal(text, new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'short' }).format(ms));
 		assert.match(text, /\d+\/\d+\/\d+/, 'date part present');
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Story 1.6: the queue check — 401 retry-once and session-generation discard.
+// ---------------------------------------------------------------------------
+
+const ok = (accountId: string, fetchStartedAt = 1): CheckResult => ({ ok: true, accountId, fetchStartedAt, complete: true, items: [] });
+const unauth = (accountId: string): CheckResult => ({ ok: false, accountId, fetchStartedAt: 1, reason: 'unauthenticated' });
+
+function queueHarness(opts: {
+	sessions: Array<{ accountId: string; token: string } | undefined>;
+	results: Array<CheckResult | (() => Promise<CheckResult>)>;
+}) {
+	let generation = 3;
+	const tokenLookups: number[] = [];
+	const fetches: Array<{ token: string; accountId: string }> = [];
+	const mutate: Array<CheckResult | undefined> = [];
+	const logs: string[] = [];
+	const deps: QueueCheckDeps = {
+		lookupsSettled: async () => {},
+		generation: () => generation,
+		getToken: async () => {
+			tokenLookups.push(generation);
+			return opts.sessions.length > 1 ? opts.sessions.shift() : opts.sessions[0];
+		},
+		fetchCheck: async (token, accountId) => {
+			fetches.push({ token, accountId });
+			const next = opts.results.shift();
+			assert.ok(next, 'unexpected extra GitHub check');
+			return typeof next === 'function' ? next() : next;
+		},
+		apply: async (result) => {
+			mutate.push(result);
+		},
+		log: (line) => logs.push(line),
+	};
+	return {
+		check: createQueueCheck(deps),
+		bump: () => ++generation,
+		tokenLookups,
+		fetches,
+		mutate,
+		logs,
+	};
+}
+
+test('401 → one silent re-lookup → one retry; a retry success applies normally with no failure', async () => {
+	const h = queueHarness({ sessions: [{ accountId: 'A', token: 't1' }, { accountId: 'A', token: 't2' }], results: [unauth('A'), ok('A')] });
+	await h.check();
+	assert.equal(h.tokenLookups.length, 2, 'exactly one silent re-lookup');
+	assert.deepEqual(h.fetches, [
+		{ token: 't1', accountId: 'A' },
+		{ token: 't2', accountId: 'A' },
+	]);
+	assert.deepEqual(h.mutate, [ok('A')], 'the success is applied; no failure recorded');
+	assert.ok(h.logs.some((l) => /retrying once/.test(l)), 'retry logged');
+	assert.ok(!h.logs.some((l) => /after retry/.test(l)));
+});
+
+test('401 → re-lookup → 401 again: unauthenticated is applied (even with the same token) and logged', async () => {
+	const same = { accountId: 'A', token: 't1' };
+	const h = queueHarness({ sessions: [same, same], results: [unauth('A'), unauth('A')] });
+	await h.check();
+	assert.equal(h.tokenLookups.length, 2);
+	assert.equal(h.fetches.length, 2, 'retried exactly once');
+	assert.deepEqual(h.mutate, [unauth('A')]);
+	assert.ok(h.logs.some((l) => /401 after retry/.test(l)));
+});
+
+test('a 401 whose re-lookup finds no session applies "no session" (signed out)', async () => {
+	const h = queueHarness({ sessions: [{ accountId: 'A', token: 't1' }, undefined], results: [unauth('A')] });
+	await h.check();
+	assert.deepEqual(h.mutate, [undefined]);
+});
+
+test('matrix "Account switch mid-check": a generation change during a check discards the result (mutate not called for it)', async () => {
+	let release!: (r: CheckResult) => void;
+	const inFlight = new Promise<CheckResult>((resolve) => (release = resolve));
+	const h = queueHarness({
+		sessions: [{ accountId: 'A', token: 'tA' }, { accountId: 'B', token: 'tB' }],
+		results: [() => inFlight, ok('B', 2)],
+	});
+	const done = h.check();
+	await flush();
+	assert.equal(h.fetches.length, 1, 'gen-3 check in flight');
+	h.bump(); // onDidChangeSessions → silent lookup → generation 4
+	release(ok('A'));
+	await done;
+	assert.ok(!h.mutate.some((r) => r?.ok && r.accountId === 'A'), 'the gen-3 result never reaches store.mutate');
+	assert.deepEqual(h.mutate, [ok('B', 2)], 'the gen-4 check applies only the new account');
+	assert.deepEqual(h.tokenLookups, [3, 4]);
+	assert.ok(h.logs.some((l) => /discarded/.test(l) && /3 → 4/.test(l)), 'discard logged');
+});
+
+test('a generation that keeps changing gives up after the attempt cap without applying anything', async () => {
+	const results: Array<() => Promise<CheckResult>> = [];
+	const h = queueHarness({ sessions: [{ accountId: 'A', token: 't' }], results });
+	for (let i = 0; i < MAX_GENERATION_ATTEMPTS; i++) {
+		results.push(async () => {
+			h.bump();
+			return ok('A');
+		});
+	}
+	await h.check();
+	assert.equal(h.fetches.length, MAX_GENERATION_ATTEMPTS);
+	assert.deepEqual(h.mutate, []);
+	assert.ok(h.logs.some((l) => /kept changing/.test(l)));
+});
+
+test('scheduler + queue check: a session-changed trigger that joins a discarded check still gets the new account', async () => {
+	let release!: (r: CheckResult) => void;
+	const inFlight = new Promise<CheckResult>((resolve) => (release = resolve));
+	const q = queueHarness({
+		sessions: [{ accountId: 'A', token: 'tA' }, { accountId: 'B', token: 'tB' }],
+		results: [() => inFlight, ok('B', 2)],
+	});
+	const h = harness({ runCheck: q.check });
+	const first = h.scheduler.trigger('manual');
+	await flush();
+	q.bump();
+	const joined = h.scheduler.trigger('session-changed');
+	assert.equal(joined, first, 'session-changed joins the in-flight check');
+	release(ok('A'));
+	await joined;
+	assert.deepEqual(q.mutate, [ok('B', 2)]);
+});
+
+// ---------------------------------------------------------------------------
+// Story 1.6: connection transitions after a check, and the Connect/Reconnect plan.
+// ---------------------------------------------------------------------------
+
+const connectedA: ConnectionState = { kind: 'connected', accountId: 'A', label: 'alice', generation: 3 };
+const unauthA: ConnectionState = { kind: 'unconnected', reason: 'unauthenticated', accountId: 'A', label: 'alice' };
+const signedOut: ConnectionState = { kind: 'unconnected', reason: 'signed_out' };
+
+test('nextConnection: no session → signed_out (unchanged object when already signed out)', () => {
+	assert.deepEqual(nextConnection(connectedA, undefined, 3), signedOut);
+	assert.deepEqual(nextConnection(unauthA, undefined, 3), signedOut);
+	assert.equal(nextConnection(signedOut, undefined, 3), signedOut);
+});
+
+test('nextConnection: 401 after retry → unauthenticated, keeping the account id and label', () => {
+	assert.deepEqual(nextConnection(connectedA, unauth('A'), 3), unauthA);
+	const { accountId: _omit, ...noAccount } = unauth('A') as Extract<CheckResult, { ok: false }>;
+	assert.deepEqual(nextConnection(connectedA, noAccount, 3), unauthA, 'falls back to the active account');
+	assert.equal(nextConnection(unauthA, unauth('A'), 3), unauthA, 'unchanged when already unauthenticated');
+});
+
+test('nextConnection: an ok result for the unauthenticated account → connected at the current generation', () => {
+	assert.deepEqual(nextConnection(unauthA, ok('A'), 7), { kind: 'connected', accountId: 'A', label: 'alice', generation: 7 });
+	assert.equal(nextConnection(unauthA, ok('B'), 7), unauthA, "another account's success does not reconnect");
+});
+
+test('nextConnection: other results leave the connection unchanged', () => {
+	assert.equal(nextConnection(connectedA, ok('A'), 9), connectedA);
+	assert.equal(nextConnection(connectedA, { ok: false, accountId: 'A', fetchStartedAt: 1, reason: 'network' }, 9), connectedA);
+	assert.equal(nextConnection(unauthA, { ok: false, accountId: 'A', fetchStartedAt: 1, reason: 'network' }, 9), unauthA);
+});
+
+test('chain: a 401 applied via nextConnection + reconcile + viewModel keeps the rows and offers reconnect', () => {
+	const item = { id: 'PR_1', repo: 'octo/app', number: 1, title: 'Fix', author: 'bob', url: 'https://github.com/octo/app/pull/1' };
+	const rctx = { now: 10, activeAccountId: 'A', intervalMs: 15 * MIN };
+	const succeeded = reconcile({ schemaVersion: 1, accounts: {} }, { ok: true, accountId: 'A', fetchStartedAt: 5, complete: true, items: [item] }, rctx).stored;
+	const failure: CheckResult = { ok: false, accountId: 'A', fetchStartedAt: 9, reason: 'unauthenticated' };
+	const connection = nextConnection(connectedA, failure, 3);
+	const stored = reconcile(succeeded, failure, { ...rctx, activeAccountId: activeAccountId(connection) }).stored;
+	const m = viewModel(stored, { connection, readOnly: false, checking: false }, { now: 10, formatTime: (ms) => `t${ms}` });
+	assert.equal(m.action, 'reconnect');
+	assert.equal(m.reason, 'unauthenticated');
+	assert.deepEqual(
+		m.rows.map((r) => r.id),
+		['PR_1'],
+	);
+	assert.match(m.message!, /from t5\..*Reconnect/);
+});
+
+test('connectPlan: forces a new session only while unauthenticated', () => {
+	assert.equal(connectPlan(unauthA).force, true);
+	for (const state of [signedOut, connectedA, { kind: 'unknown' } as ConnectionState]) {
+		assert.equal(connectPlan(state).force, false);
+	}
+});
+
+test('connectPlan: a cancelled forced Reconnect keeps the current state; a plain Connect applies signed_out', () => {
+	const found = { kind: 'connected', accountId: 'A', label: 'alice' } as const;
+	const cancelled = { kind: 'unconnected', reason: 'signed_out' } as const;
+	assert.equal(connectPlan(unauthA).map(cancelled), undefined, 'undefined = keep the unauthenticated state');
+	assert.deepEqual(connectPlan(unauthA).map(found), found);
+	assert.deepEqual(connectPlan(signedOut).map(cancelled), cancelled);
+	assert.deepEqual(connectPlan(signedOut).map(found), found);
 });

@@ -2,8 +2,10 @@
 // `session-changed`; allows one in-flight check per window that later triggers join; adds
 // shell-side jitter to non-manual triggers; and runs the periodic timer. No `vscode` import:
 // timers, randomness, and the check itself are injected so tests can use fakes.
-import { shortReason } from '../core/connection.ts';
+import { activeAccountId, shortReason, type ConnectionState, type SessionLookup } from '../core/connection.ts';
 import { copy } from '../core/copy.ts';
+import type { CheckResult } from '../core/types.ts';
+import { checkWithRetry } from './checkWithRetry.ts';
 
 export type TriggerKind = 'activation' | 'periodic' | 'manual' | 'session-changed';
 
@@ -142,6 +144,89 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 				wait = undefined;
 			}
 		},
+	};
+}
+
+/**
+ * The window's connection after applying a check result from the current generation. No session
+ * is `signed_out`; a 401 after the retry is `unauthenticated` and keeps the account so its rows
+ * stay as stale; a success for the unauthenticated account returns it to `connected` at
+ * `generation`. Returns `current` itself when nothing changes.
+ */
+export function nextConnection(current: ConnectionState, result: CheckResult | undefined, generation: number): ConnectionState {
+	if (!result) {
+		return current.kind === 'unconnected' && current.reason === 'signed_out' ? current : { kind: 'unconnected', reason: 'signed_out' };
+	}
+	const label = 'label' in current ? current.label : undefined;
+	if (!result.ok && result.reason === 'unauthenticated') {
+		const accountId = result.accountId ?? activeAccountId(current);
+		if (current.kind === 'unconnected' && current.reason === 'unauthenticated' && current.accountId === accountId) {
+			return current;
+		}
+		return { kind: 'unconnected', reason: 'unauthenticated', accountId, label };
+	}
+	if (result.ok && current.kind === 'unconnected' && current.reason === 'unauthenticated' && result.accountId === current.accountId) {
+		return { kind: 'connected', accountId: result.accountId, label: label ?? '', generation };
+	}
+	return current;
+}
+
+/**
+ * How Connect runs from the current state: Reconnect (`force`, a new session via
+ * `forceNewSession`) only while unauthenticated. `map` turns the sign-in result into the lookup to
+ * apply; `undefined` keeps the current state, so a cancelled Reconnect keeps its stale rows.
+ */
+export function connectPlan(current: ConnectionState): { force: boolean; map: (found: SessionLookup) => SessionLookup | undefined } {
+	const force = current.kind === 'unconnected' && current.reason === 'unauthenticated';
+	return { force, map: (found) => (force && found.kind !== 'connected' ? undefined : found) };
+}
+
+/** A check whose result was discarded runs again at most this many times in total. */
+export const MAX_GENERATION_ATTEMPTS = 3;
+
+export interface QueueCheckDeps {
+	/** Resolves once the newest silent connection lookup has been applied. */
+	lookupsSettled: () => Promise<void>;
+	/** The window's current session generation. */
+	generation: () => number;
+	/** Fresh silent session lookup; undefined when there is no session. */
+	getToken: () => Promise<{ accountId: string; token: string } | undefined>;
+	/** One GitHub check with the given token. */
+	fetchCheck: (token: string, accountId: string) => Promise<CheckResult>;
+	/**
+	 * Applies a result from the current generation (`store.mutate(reconcile, …)` plus connection
+	 * updates); `undefined` means no session. Never called for a discarded result.
+	 */
+	apply: (result: CheckResult | undefined) => Promise<void>;
+	log: (line: string) => void;
+}
+
+/**
+ * The scheduler's `runCheck` (AD-11, AD-14): wait for the window's connection, capture the session
+ * generation, check with one silent re-lookup and retry on 401, then apply the result only if the
+ * generation is unchanged. A discarded result is logged and the check runs again for the new
+ * generation, so triggers that joined it (session-changed, Connect) still see a current result.
+ */
+export function createQueueCheck(deps: QueueCheckDeps): () => Promise<void> {
+	return async () => {
+		for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+			await deps.lookupsSettled();
+			const started = deps.generation();
+			const result = await checkWithRetry({ getToken: deps.getToken, runCheck: deps.fetchCheck, log: deps.log });
+			const current = deps.generation();
+			if (current !== started) {
+				deps.log(copy.log.checkDiscarded(started, current));
+				continue;
+			}
+			if (!result) {
+				deps.log(copy.log.checkNoSession);
+			} else if (!result.ok && result.reason === 'unauthenticated') {
+				deps.log(copy.log.checkUnauthenticated);
+			}
+			await deps.apply(result);
+			return;
+		}
+		deps.log(copy.log.checkGenerationGaveUp);
 	};
 }
 

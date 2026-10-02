@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copy } from '../../src/core/copy.ts';
+import { copy, failureCopy, failureMessage } from '../../src/core/copy.ts';
 import type { ConnectionState } from '../../src/core/connection.ts';
 import { emptyAccount, reconcile } from '../../src/core/reconcile.ts';
-import type { Account, Stored, Tracked } from '../../src/core/types.ts';
+import type { Account, FailureReason, Stored, Tracked } from '../../src/core/types.ts';
 import { formatRequestAge, viewModel, type WindowView } from '../../src/core/viewModel.ts';
 
 const NOW = 100_000;
 const formatTime = (ms: number): string => `t${ms}`;
-const connected: ConnectionState = { kind: 'connected', accountId: 'Y', label: 'octocat' };
+const connected: ConnectionState = { kind: 'connected', accountId: 'Y', label: 'octocat', generation: 1 };
 const win = (extra: Partial<WindowView> = {}): WindowView => ({ connection: connected, readOnly: false, checking: false, ...extra });
 const tracked = (id: string, firstSeenAt: number, extra: Partial<Tracked> = {}): Tracked => ({
 	id,
@@ -45,10 +45,12 @@ test('readOnly wins over everything', () => {
 	assert.match(copy.updatePulley, /Update Pulley/);
 });
 
-test('unconnected: no rows, no count, no message (welcome content explains)', () => {
+test('signed out: no rows, no count, no message (welcome content with Connect explains)', () => {
 	const stored = withAccount({ lastSuccessAt: 1, items: items(tracked('A', 1)) });
-	assert.deepEqual(viewModel(stored, win({ connection: { kind: 'unconnected' } }), { now: NOW, formatTime }), {
+	assert.deepEqual(viewModel(stored, win({ connection: { kind: 'unconnected', reason: 'signed_out' } }), { now: NOW, formatTime }), {
 		status: 'unconnected',
+		reason: 'signed_out',
+		action: 'connect',
 		count: null,
 		rows: [],
 	});
@@ -131,14 +133,17 @@ test('stale with rows: lastFailure newer than lastSuccessAt keeps rows', () => {
 		{ now: NOW, formatTime },
 	);
 	assert.equal(m.status, 'stale');
-	assert.equal(m.count, 1);
-	assert.equal(m.message, "Couldn't check GitHub. Showing the last known requests.");
+	assert.equal(m.count, null, 'a stale count is never shown');
+	assert.equal(m.message, "Couldn't check GitHub. Showing the last known requests from t5. GitHub could not be reached. Refresh to try again.");
+	assert.equal(m.action, 'refresh');
 	assert.equal(m.rows.length, 1);
 });
 
 test('stale with no rows and no success ever: no zero, no clear', () => {
 	const m = viewModel(withAccount({ lastFailure: { at: 9, reason: 'network' } }), win(), { now: NOW, formatTime });
-	assert.deepEqual(m, { status: 'stale', count: null, message: copy.failed, rows: [] });
+	assert.deepEqual(m, { status: 'stale', action: 'refresh', count: null, message: failureMessage('network', undefined), rows: [] });
+	assert.match(m.message!, /^Couldn't check GitHub, so the queue is unavailable\./);
+	assert.doesNotMatch(m.message!, NO_ZERO);
 });
 
 test('a failure older than the last success is not stale', () => {
@@ -318,11 +323,171 @@ test('last checked: a failed check newer than the last success leaves lastSucces
 	assert.ok(failed.accounts.Y.lastFailure!.at > 5, 'the failure is newer than the success');
 	const afterFailure = viewModel(failed, win(), { now: NOW, formatTime: fmt });
 	assert.equal(afterFailure.status, 'stale');
-	assert.equal(afterFailure.message, copy.stale, 'stale copy unchanged (Story 1.6 owns it)');
+	assert.equal(afterFailure.message, failureMessage('network', 't5'), 'stale copy carries the last success time');
 
 	// A later render with no recovery still has only the original success time to show.
 	const again = reconcile(failed, { ok: false, accountId: 'Y', fetchStartedAt: 30, reason: 'network' }, rctx).stored;
 	assert.equal(again.accounts.Y.lastSuccessAt, 5);
 	viewModel(again, win(), { now: NOW, formatTime: fmt });
 	assert.deepEqual([...new Set(formatted)], [5], 'formatTime only ever sees the original success time');
+});
+
+// ---------------------------------------------------------------------------
+// Story 1.6: per-reason recovery messages and actions.
+// ---------------------------------------------------------------------------
+
+const REASONS: FailureReason[] = ['signed_out', 'unauthenticated', 'network', 'rate_limited', 'graphql_error'];
+const EXPECTED_ACTION: Record<FailureReason, string> = {
+	signed_out: 'connect',
+	unauthenticated: 'reconnect',
+	network: 'refresh',
+	rate_limited: 'refresh',
+	graphql_error: 'refresh',
+};
+
+for (const reason of REASONS) {
+	test(`failure "${reason}" after a prior success: stale with the time, the reason hint, its action, rows kept, no count`, () => {
+		const stored = withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason }, items: items(tracked('A', 1)) });
+		const m = viewModel(stored, win(), { now: NOW, formatTime });
+		assert.equal(m.status, 'stale');
+		assert.equal(m.count, null);
+		assert.equal(m.action, EXPECTED_ACTION[reason]);
+		assert.equal(m.action, failureCopy[reason].action);
+		assert.equal(m.message, `Couldn't check GitHub. Showing the last known requests from t5. ${failureCopy[reason].hint}`);
+		assert.deepEqual(
+			m.rows.map((r) => r.id),
+			['A'],
+		);
+	});
+
+	test(`failure "${reason}" with no prior success: unavailable, no rows, no count, no zero, no clear`, () => {
+		const m = viewModel(withAccount({ lastFailure: { at: 9, reason } }), win(), { now: NOW, formatTime });
+		assert.equal(m.status, 'stale');
+		assert.equal(m.count, null);
+		assert.equal(m.action, EXPECTED_ACTION[reason]);
+		assert.equal(m.message, `Couldn't check GitHub, so the queue is unavailable. ${failureCopy[reason].hint}`);
+		assert.deepEqual(m.rows, []);
+		assert.doesNotMatch(m.message!, NO_ZERO);
+		assert.doesNotMatch(m.message!, /Last checked/);
+	});
+}
+
+test('every failure hint names its action', () => {
+	const verb = { connect: /Connect/, reconnect: /Reconnect/, refresh: /Refresh/ };
+	for (const reason of REASONS) {
+		const { hint, action } = failureCopy[reason];
+		assert.match(hint, verb[action], reason);
+		assert.doesNotMatch(hint, NO_ZERO, reason);
+	}
+	assert.match(failureCopy.rate_limited.hint, /^GitHub rate limit reached\./);
+});
+
+const unauthenticated = (extra: { accountId?: string; label?: string } = { accountId: 'Y', label: 'octocat' }): ConnectionState => ({
+	kind: 'unconnected',
+	reason: 'unauthenticated',
+	...extra,
+});
+
+test('unauthenticated with stored rows after a success: rows stay as stale with Reconnect in the message', () => {
+	const stored = withAccount({
+		firstCheckDone: true,
+		lastSuccessAt: 5,
+		lastFailure: { at: 9, reason: 'unauthenticated' },
+		items: items(tracked('A', 1)),
+	});
+	const m = viewModel(stored, win({ connection: unauthenticated() }), { now: NOW, formatTime });
+	assert.deepEqual(
+		{ status: m.status, reason: m.reason, action: m.action, count: m.count, message: m.message, rows: m.rows.map((r) => r.id) },
+		{
+			status: 'unconnected',
+			reason: 'unauthenticated',
+			action: 'reconnect',
+			count: null,
+			message: `Couldn't check GitHub. Showing the last known requests from t5. ${failureCopy.unauthenticated.hint}`,
+			rows: ['A'],
+		},
+	);
+	assert.match(m.message!, /Reconnect/);
+});
+
+test('unauthenticated with no rows: no message, so the Reconnect welcome content shows', () => {
+	const stores: Stored[] = [withAccount({ firstCheckDone: true, lastSuccessAt: 5 }), withAccount({}), { schemaVersion: 1, accounts: {} }];
+	for (const stored of stores) {
+		assert.deepEqual(viewModel(stored, win({ connection: unauthenticated() }), { now: NOW, formatTime }), {
+			status: 'unconnected',
+			reason: 'unauthenticated',
+			action: 'reconnect',
+			count: null,
+			rows: [],
+		});
+	}
+	// No known account: nothing to show.
+	const noAccount = viewModel(withAccount({ items: items(tracked('A', 1)) }), win({ connection: unauthenticated({}) }), { now: NOW, formatTime });
+	assert.deepEqual(noAccount.rows, []);
+});
+
+test('unauthenticated with rows but no prior success: unavailable message with Reconnect, no count', () => {
+	const stored = withAccount({ firstCheckDone: true, lastIncompleteFetchStartedAt: 3, items: items(tracked('A', 1)) });
+	const m = viewModel(stored, win({ connection: unauthenticated() }), { now: NOW, formatTime });
+	assert.equal(m.count, null);
+	assert.equal(m.message, `Couldn't check GitHub, so the queue is unavailable. ${failureCopy.unauthenticated.hint}`);
+});
+
+test('the clear copy includes the visibility sentence', () => {
+	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5 }), win(), { now: NOW, formatTime });
+	assert.equal(m.status, 'clear');
+	assert.match(m.message!, /^No reviews are waiting in repositories visible to this GitHub sign-in\. Last checked t5$/);
+	assert.match(copy.unauthenticatedExplanation, /Only repositories visible to this GitHub sign-in are included\./);
+});
+
+test('count is null whenever status is not pending or clear; a stale count is never 0', () => {
+	const stores: Stored[] = [
+		{ schemaVersion: 1, accounts: {} },
+		withAccount({}),
+		withAccount({ firstCheckDone: true, lastIncompleteFetchStartedAt: 5 }),
+		withAccount({ firstCheckDone: true, lastIncompleteFetchStartedAt: 5, items: items(tracked('A', 1)) }),
+		withAccount({ firstCheckDone: true, lastSuccessAt: 5 }),
+		withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(tracked('A', 1)) }),
+		withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason: 'network' } }),
+		withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason: 'rate_limited' }, items: items(tracked('A', 1)) }),
+		withAccount({ lastFailure: { at: 9, reason: 'graphql_error' } }),
+	];
+	const connections: ConnectionState[] = [connected, unauthenticated(), { kind: 'unconnected', reason: 'signed_out' }, { kind: 'unknown' }];
+	let staleSeen = 0;
+	for (const stored of stores) {
+		for (const connection of connections) {
+			for (const checking of [false, true]) {
+				const m = viewModel(stored, win({ connection, checking }), { now: NOW, formatTime });
+				if (m.status !== 'pending' && m.status !== 'clear') {
+					assert.equal(m.count, null, `${m.status}: ${JSON.stringify(stored)}`);
+				}
+				if (m.status === 'stale') {
+					staleSeen++;
+					assert.doesNotMatch(m.message!, NO_ZERO);
+				}
+			}
+		}
+	}
+	assert.ok(staleSeen > 0);
+});
+
+test('recovery to empty: a complete success with no items after a failure is clear with last checked', () => {
+	const rctx = { now: NOW, activeAccountId: 'Y', intervalMs: 15 * 60_000 };
+	const failed = withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason: 'network' }, items: items(tracked('A', 1)) });
+	const recovered = reconcile(failed, { ok: true, accountId: 'Y', fetchStartedAt: 20, complete: true, items: [] }, rctx).stored;
+	const m = viewModel(recovered, win(), { now: NOW, formatTime });
+	assert.deepEqual(m, { status: 'clear', count: 0, message: `${copy.clear} Last checked t20`, rows: [] });
+});
+
+test("account switch: the previous account's rows never render for the new account", () => {
+	const stored: Stored = {
+		schemaVersion: 1,
+		accounts: {
+			X: { ...emptyAccount(), lastSuccessAt: 1, items: items(tracked('X1', 1)) },
+			Y: { ...emptyAccount(), firstCheckDone: true, lastSuccessAt: 2 },
+		},
+	};
+	const m = viewModel(stored, win({ connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 4 } }), { now: NOW, formatTime });
+	assert.equal(m.status, 'clear');
+	assert.deepEqual(m.rows, []);
 });

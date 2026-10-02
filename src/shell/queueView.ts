@@ -74,6 +74,19 @@ export class QueueTreeDataProvider implements vscode.TreeDataProvider<Row> {
 	}
 }
 
+/**
+ * The `pulley.connection` context key value. It gates the Connect and Reconnect welcome content,
+ * the Reconnect title action (`unauthenticated`), and Refresh (`connected`).
+ */
+export type ConnectionContextKey = 'unconnected' | 'unauthenticated' | 'connected';
+
+export function connectionContextKey(model: ViewModel): ConnectionContextKey {
+	if (model.status !== 'unconnected') {
+		return 'connected';
+	}
+	return model.reason === 'unauthenticated' ? 'unauthenticated' : 'unconnected';
+}
+
 /** The parts of a TreeView that QueueView touches; injectable for tests. */
 export type QueueTreeView = Pick<vscode.TreeView<Row>, 'message' | 'dispose'>;
 export type SetContext = (key: string, value: unknown) => Thenable<unknown>;
@@ -85,7 +98,7 @@ export class QueueView implements vscode.Disposable {
 	private readonly setContext: SetContext;
 	readonly provider: QueueTreeDataProvider;
 	private last: ViewModel | undefined;
-	private contextKey: 'unconnected' | 'connected' | undefined;
+	private contextKey: ConnectionContextKey | undefined;
 
 	constructor(treeView?: QueueTreeView, setContext: SetContext = defaultSetContext) {
 		this.provider = new QueueTreeDataProvider();
@@ -111,8 +124,7 @@ export class QueueView implements vscode.Disposable {
 		if (!previous || previous.message !== model.message) {
 			this.treeView.message = model.message;
 		}
-		// The key only gates the `== unconnected` welcome content.
-		const key = model.status === 'unconnected' ? 'unconnected' : 'connected';
+		const key = connectionContextKey(model);
 		if (key !== this.contextKey) {
 			this.contextKey = key;
 			await this.setContext(CONNECTION_CONTEXT_KEY, key);

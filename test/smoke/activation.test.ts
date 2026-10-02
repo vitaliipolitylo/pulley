@@ -34,9 +34,10 @@ suite('Activation', () => {
 		assert.ok(!commands.includes('pulley.debugSeed'), 'debug seed is registered only in Development mode');
 	});
 
-	test('registers pulley.refresh', async () => {
+	test('registers pulley.refresh and pulley.reconnect', async () => {
 		const commands = await vscode.commands.getCommands(true);
 		assert.ok(commands.includes('pulley.refresh'));
+		assert.ok(commands.includes('pulley.reconnect'));
 	});
 
 	test('pulley.checkIntervalMinutes defaults to 15', () => {

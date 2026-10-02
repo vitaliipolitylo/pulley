@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import type * as vscode from 'vscode';
-import { connect, getToken, lookupSilently, onGitHubSessionsChanged, type GetSession } from '../../src/shell/auth.ts';
+import { copy } from '../../src/core/copy.ts';
+import { connect, getToken, lookupSilently, onGitHubSessionsChanged, SessionGeneration, type GetSession } from '../../src/shell/auth.ts';
 
 const TOKEN = 'gho_secret_token_value';
 const session: vscode.AuthenticationSession = {
@@ -23,7 +24,7 @@ suite('Auth', () => {
 	test('fresh start: silent lookup with no session is unconnected and never prompts', async () => {
 		const { calls, getSession } = recorder(async () => undefined);
 		const state = await lookupSilently(() => {}, getSession);
-		assert.deepStrictEqual(state, { kind: 'unconnected' });
+		assert.deepStrictEqual(state, { kind: 'unconnected', reason: 'signed_out' });
 		assert.deepStrictEqual(calls, [{ providerId: 'github', scopes: ['repo'], options: { silent: true } }]);
 	});
 
@@ -37,7 +38,7 @@ suite('Auth', () => {
 	test('connect succeeds: requests repo with createIfNone and keeps no token', async () => {
 		const lines: string[] = [];
 		const { calls, getSession } = recorder(async () => session);
-		const state = await connect((l) => lines.push(l), getSession);
+		const state = await connect((l) => lines.push(l), { getSession });
 		assert.deepStrictEqual(state, { kind: 'connected', accountId: '42', label: 'octocat' });
 		assert.deepStrictEqual(calls[0].options, { createIfNone: true });
 		assert.ok(!lines.join('\n').includes(TOKEN));
@@ -48,9 +49,28 @@ suite('Auth', () => {
 		const { getSession } = recorder(async () => {
 			throw new Error('User did not consent to login.');
 		});
-		const state = await connect((l) => lines.push(l), getSession);
-		assert.deepStrictEqual(state, { kind: 'unconnected' });
+		const state = await connect((l) => lines.push(l), { getSession });
+		assert.deepStrictEqual(state, { kind: 'unconnected', reason: 'signed_out' });
 		assert.ok(lines.some((l) => l.includes('User did not consent to login.')));
+	});
+
+	test('reconnect (force): asks for a new session with forceNewSession and the explanation, never createIfNone', async () => {
+		const lines: string[] = [];
+		const { calls, getSession } = recorder(async () => session);
+		const state = await connect((l) => lines.push(l), { force: true, getSession });
+		assert.deepStrictEqual(state, { kind: 'connected', accountId: '42', label: 'octocat' });
+		assert.deepStrictEqual(calls, [
+			{ providerId: 'github', scopes: ['repo'], options: { forceNewSession: { detail: copy.reconnectDetail } } },
+		]);
+		assert.ok(!lines.join('\n').includes(TOKEN));
+	});
+
+	test('session generation advances by one per call', () => {
+		const generation = new SessionGeneration();
+		assert.strictEqual(generation.current, 0);
+		assert.strictEqual(generation.next(), 1);
+		assert.strictEqual(generation.next(), 2);
+		assert.strictEqual(generation.current, 2);
 	});
 
 	test('session removed elsewhere: silent lookup returning undefined goes back to unconnected', async () => {
@@ -58,7 +78,7 @@ suite('Auth', () => {
 		const { getSession } = recorder(async () => current);
 		assert.strictEqual((await lookupSilently(() => {}, getSession)).kind, 'connected');
 		current = undefined;
-		assert.deepStrictEqual(await lookupSilently(() => {}, getSession), { kind: 'unconnected' });
+		assert.deepStrictEqual(await lookupSilently(() => {}, getSession), { kind: 'unconnected', reason: 'signed_out' });
 	});
 
 	test('session change listener runs only for the github provider', () => {
@@ -81,7 +101,7 @@ suite('Auth', () => {
 		const { getSession } = recorder(async () => {
 			throw new Error('provider unavailable');
 		});
-		assert.deepStrictEqual(await lookupSilently(() => {}, getSession), { kind: 'unconnected' });
+		assert.deepStrictEqual(await lookupSilently(() => {}, getSession), { kind: 'unconnected', reason: 'signed_out' });
 	});
 });
 

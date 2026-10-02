@@ -2,7 +2,8 @@
 title: 'Story 1.6: Recover from missing or uncertain GitHub data'
 type: 'feature'
 created: '2026-09-30'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: 'e816bd29811f5bbcd5f1b4a82352acc8074e2fe7'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -72,11 +73,11 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/core/connection.ts`, `viewModel.ts`, `copy.ts` -- per Always.
-- [ ] `src/shell/auth.ts`, `scheduler.ts`, `queueView.ts`, `src/extension.ts`, `package.json` -- the retry, generation, Reconnect, and quiet updates.
-- [ ] `test/core/viewModel.test.ts` -- one case per reason × {prior success, none}, plus: the clear copy includes the visibility sentence, and a stale count is never 0 without qualification.
-- [ ] `test/shell/scheduler.test.ts` -- 401 → silent re-lookup once → retry; a generation change during a check discards the result (the `mutate` spy is not called).
-- [ ] `test/smoke/queueView.test.ts` -- rendering the same model twice does not set `message` again (spy).
+- [x] `src/core/connection.ts`, `viewModel.ts`, `copy.ts` -- per Always.
+- [x] `src/shell/auth.ts`, `scheduler.ts`, `queueView.ts`, `src/extension.ts`, `package.json` -- the retry, generation, Reconnect, and quiet updates.
+- [x] `test/core/viewModel.test.ts` -- one case per reason × {prior success, none}, plus: the clear copy includes the visibility sentence, and a stale count is never 0 without qualification.
+- [x] `test/shell/scheduler.test.ts` -- 401 → silent re-lookup once → retry; a generation change during a check discards the result (the `mutate` spy is not called).
+- [x] `test/smoke/queueView.test.ts` -- rendering the same model twice does not set `message` again (spy).
 
 **Acceptance Criteria:**
 - Given no usable session at startup, when the view opens, then it shows the account-scoped signed-out explanation and Connect, and no zero and no sign-in dialog.
@@ -95,6 +96,35 @@ context:
 
 ## Implementation Notes
 
+- `ConnectionState` keeps `{ kind: 'unknown' }` for the startup lookup. The `unauthenticated` variant carries optional `accountId`/`label` so the account stays active; `activeAccountId(connection)` (core) returns it for `connected` and `unauthenticated`. Auth lookups return `SessionLookup` (no generation); `extension.ts` stamps the generation when it applies a lookup.
+- `copy.ts`: `failureCopy` maps each `FailureReason` to one hint and one action; `failureMessage(reason, time?)` builds the stale ("…from {time}.") or unavailable message plus the hint. `ViewModel` gained `reason` (unconnected only) and `action` (unconnected and stale). Stale and unavailable both use status `stale` with `count: null`.
+- Unauthenticated with rows: status `unconnected`, reason `unauthenticated`, rows kept, message = stale/unavailable + the Reconnect hint. With no rows the message is unset so the Reconnect welcome content shows.
+- Reconnect is a separate command `pulley.reconnect` ("Reconnect GitHub", `$(account)`) for the `view/title` action (and the palette when unauthenticated); it runs the same handler as `pulley.connect`, which uses `forceNewSession: { detail }` when the window is unauthenticated. A cancelled Reconnect keeps the unauthenticated state. The welcome link runs `pulley.connect`.
+- `createQueueCheck` (in `scheduler.ts`, vscode-free) is the scheduler's `runCheck`: wait for silent lookups, capture the generation, `checkWithRetry` (401 → one silent re-lookup → one retry), then apply only if the generation is unchanged. A discarded result is logged and the check runs again for the new generation (at most `MAX_GENERATION_ATTEMPTS` = 3 in total), so a `session-changed` or Connect trigger that joined the in-flight check still gets a current result.
+- `SessionGeneration` (in `auth.ts`) advances on every applied lookup (activation, Connect/Reconnect, session change). A success for the account while unauthenticated returns the window to `connected` without advancing it.
+- `QueueView` sets `pulley.connection` to `unconnected`, `unauthenticated`, or `connected`; the deep-equal and same-string guards are unchanged. Note: the pending/clear message includes "Last checked {time}" (Story 1.5), so a successful poll in a new minute changes the string and is re-set once; identical models and failed polls (stale time is the last success) are not re-set.
+
 ## Spec Change Log
 
 ## Review Triage Log
+
+| # | Source | Location | Finding | Verdict | Evidence | Route |
+|---|--------|----------|---------|---------|----------|-------|
+| 1 | verification-gap, blind-hunter | src/extension.ts `applyResult` | Connection transitions after a check (signed_out / unauthenticated keeps account / reconnect on success) untested | medium | Pre-verified gap: tests stub `apply` or hand-build the connection; dropping `accountId` passes all tests | patch |
+| 2 | verification-gap (x2), blind-hunter | src/extension.ts `connectOrReconnect`; test/smoke/activation.test.ts | Force choice and cancelled-Reconnect mapping untested; activation test only checks registration | medium | Pre-verified gap: hard-coding `force = false` passes all tests | patch |
+| 3 | blind-hunter | src/core/types.ts `ViewModel.reason` | Repeats `UnconnectedReason` inline | low | Two sources of truth for the reason union; direct correction | patch |
+| 4 | blind-hunter | test/smoke/queueView.test.ts | Test name says connected/unconnected though the key now has three values | low | Name out of date; direct rename | patch |
+| 5 | blind-hunter | src/core/viewModel.ts stale branch | "Showing the last known requests from {time}" over an empty tree | false | The last known set at that time is empty and is what is shown; this is the frozen copy for stale-after-success, with no count or clear claim | reject |
+| 6 | blind-hunter, edge-case-hunter | src/core/viewModel.ts stale/unauthenticated branches | "Unavailable" shown next to rows from incomplete-only checks | low | Real only after a partial check followed by a failure, with no complete success ever; rare, and the fix adds a branch/copy variant | reject |
+| 7 | blind-hunter, edge-case-hunter | src/extension.ts `applyResult` label | Unauthenticated/connected state may carry another account's or an empty label | false | `ConnectionState.label` is never rendered or logged (grep: only set, never read), so no visible outcome | reject |
+| 8 | edge-case-hunter | src/extension.ts `applyResult` | 401 result with no accountId leaves an account-less unauthenticated state | false | `runCheck` always returns the `accountId` it was given (src/shell/github.ts:234, 311) | reject |
+| 9 | edge-case-hunter | src/extension.ts `applyResult` | Unauthenticated for A while silent token is B: B's success dropped | false | A session switch to B fires onDidChangeSessions, whose applied lookup sets connected(B) and bumps the generation | reject |
+| 10 | blind-hunter, edge-case-hunter | src/extension.ts `apply` | Generation advances on every applied lookup even when the account is unchanged, causing refetches | low | Matches the frozen rule "onDidChangeSessions → … generation++"; cost is one refetch for an event during a short check; rare | reject |
+| 11 | blind-hunter, edge-case-hunter | src/shell/scheduler.ts `createQueueCheck` | Give-up after 3 discards leaves joined triggers without a result until the next tick | low | Needs three session changes across consecutive check windows; logged; next periodic check recovers | reject |
+| 12 | blind-hunter | src/extension.ts / scheduler | Periodic checks keep sending two rejected requests while unauthenticated | low | Two requests per interval (default 15 min) is negligible and lets the window recover if the session is fixed elsewhere | reject |
+| 13 | blind-hunter | src/extension.ts session-change handler | Unrelated session event flips unauthenticated to connected until the next 401 | low | Frozen rule applies every silent lookup; the session-changed check right after it restores unauthenticated within the jitter window | reject |
+| 14 | edge-case-hunter | src/core/viewModel.ts stale branch | Connected window with a stored `unauthenticated` failure shows the Reconnect hint while Reconnect is hidden | low | Only for another window on the same revoked session or briefly after a reconnect; the next check corrects it; fix adds a connection-dependent branch | reject |
+| 15 | verification-gap, edge-case-hunter | src/extension.ts `apply` tickets | A cancelled Reconnect's ticket swallows an in-flight silent lookup | low | Needs a silent lookup already in flight when Reconnect is pressed and then cancelled; the sign-in's own session event starts after the ticket; fix adds ticket-guard complexity | reject |
+| 16 | blind-hunter | src/core/copy.ts `failureCopy.signed_out` | Hint never reachable in the stale path | false | The spec requires the signed_out → Connect mapping; its `action` is used by the signed-out view model | reject |
+| 17 | blind-hunter | package.json viewsWelcome | Reconnect welcome runs `pulley.connect` not `pulley.reconnect` | false | Frozen spec says the welcome runs `pulley.connect`; the handler forces whenever the window is unauthenticated, which is the only time that welcome shows | reject |
+| 18 | blind-hunter | diff scope | Spec and sprint status not in the diff | false | Excluded on purpose; the spec is the claims file given to the edge-case layer | reject |
