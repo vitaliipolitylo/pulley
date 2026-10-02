@@ -16,6 +16,11 @@ export interface WindowView {
 export interface ViewModelCtx {
 	/** Epoch ms, read in the shell. Used for request-age strings. */
 	now: number;
+	/**
+	 * Formats an epoch-ms check time for "Last checked {time}". Supplied by the shell
+	 * (`Intl.DateTimeFormat`, short time plus a short date when not today), so core stays clock-free.
+	 */
+	formatTime: (ms: number) => string;
 }
 
 const MINUTE = 60_000;
@@ -91,7 +96,11 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 
 	const rows = Object.values(account.items).sort(byAge).map((item) => toRow(item, ctx.now));
 	const n = rows.length;
-	const count = account.lastSuccessAt === undefined ? null : n;
+	const lastSuccessAt = account.lastSuccessAt;
+	const count = lastSuccessAt === undefined ? null : n;
+	/** " Last checked {time}" once a complete check has succeeded; nothing before that. */
+	const lastChecked = (message: string): string =>
+		lastSuccessAt === undefined ? message : `${message} ${copy.lastChecked(ctx.formatTime(lastSuccessAt))}`;
 
 	if (account.lastFailure && account.lastFailure.at > (account.lastSuccessAt ?? 0)) {
 		return { status: 'stale', count, message: n > 0 ? copy.stale : copy.failed, rows };
@@ -104,10 +113,10 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 			(account.lastIncompleteFetchStartedAt !== undefined &&
 				account.lastIncompleteFetchStartedAt > (account.lastSuccessAt ?? -Infinity));
 		const message = incomplete ? `${copy.pending(n)} ${copy.incomplete}` : copy.pending(n);
-		return { status: 'pending', count, message, rows };
+		return { status: 'pending', count, message: lastChecked(message), rows };
 	}
-	if (account.lastSuccessAt !== undefined) {
-		return { status: 'clear', count, message: copy.clear, rows };
+	if (lastSuccessAt !== undefined) {
+		return { status: 'clear', count, message: lastChecked(copy.clear), rows };
 	}
 	// Only incomplete successes that returned nothing (or none yet): never show a zero.
 	const message = account.firstCheckDone && !window.checking ? copy.incomplete : copy.checking;

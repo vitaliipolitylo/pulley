@@ -33,4 +33,14 @@ suite('Activation', () => {
 		assert.ok(commands.includes('pulley.openPullRequest'));
 		assert.ok(!commands.includes('pulley.debugSeed'), 'debug seed is registered only in Development mode');
 	});
+
+	test('registers pulley.refresh', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes('pulley.refresh'));
+	});
+
+	test('pulley.checkIntervalMinutes defaults to 15', () => {
+		const inspected = vscode.workspace.getConfiguration('pulley').inspect<number>('checkIntervalMinutes');
+		assert.strictEqual(inspected?.defaultValue, 15);
+	});
 });

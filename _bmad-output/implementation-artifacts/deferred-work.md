@@ -13,3 +13,7 @@
 - source_spec: `D:\projects\Pulley\_bmad-output\implementation-artifacts\spec-1-4-understand-and-open-a-waiting-review.md`
   summary: Move the `pulley.debugSeed` handler body out of `src/extension.ts` into a testable `src/shell` function and smoke-test its connection guard and its seed of 50 items into the active account.
   evidence: Flipping the `connection.kind !== 'connected'` guard, passing `activeAccountId: undefined`, or dropping the `setContext('pulley.development')` call passes every test today. The smoke host runs in Test mode, where the command isn't registered.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-refresh-and-schedule-queue-checks.md`
+  summary: Extract the scheduler wiring in `src/extension.ts` (runQueueCheck, Refresh progress-once, Connect manual trigger, config restart, lookup gating) into a testable factory and cover it, including the "No session" matrix row where it actually lives.
+  evidence: Story 1.5 review found these behaviors run in no automated test; the scheduler tests use a fake runCheck and the "No session" case wraps checkWithRetry directly, so regressions in the activate closures would ship unnoticed.

@@ -45,6 +45,12 @@
         "category": "Pulley"
       },
       {
+        "command": "pulley.refresh",
+        "title": "Refresh review requests",
+        "category": "Pulley",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "pulley.openPullRequest",
         "title": "Open Pull Request",
         "category": "Pulley"
@@ -55,7 +61,27 @@
         "category": "Pulley"
       }
     ],
+    "configuration": {
+      "title": "Pulley",
+      "properties": {
+        "pulley.checkIntervalMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 240,
+          "scope": "application",
+          "markdownDescription": "How often Pulley checks GitHub for review requests, in minutes (5–240)."
+        }
+      }
+    },
     "menus": {
+      "view/title": [
+        {
+          "command": "pulley.refresh",
+          "when": "view == pulley.queue && pulley.connection == connected",
+          "group": "navigation"
+        }
+      ],
       "commandPalette": [
         {
           "command": "pulley.openPullRequest",

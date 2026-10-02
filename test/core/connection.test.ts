@@ -42,6 +42,20 @@ test('package.json strings mirror copy.ts', () => {
 	const title = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id).title;
 	assert.equal(title('pulley.openPullRequest'), copy.openPullRequestCommandTitle);
 	assert.equal(title('pulley.debugSeed'), copy.debugSeedCommandTitle);
+	assert.equal(title('pulley.refresh'), copy.refreshCommandTitle);
+	const refresh = pkg.contributes.commands.find((c: { command: string }) => c.command === 'pulley.refresh');
+	assert.equal(refresh.icon, '$(refresh)');
+	assert.deepEqual(pkg.contributes.menus['view/title'], [
+		{ command: 'pulley.refresh', when: 'view == pulley.queue && pulley.connection == connected', group: 'navigation' },
+	]);
+	const interval = pkg.contributes.configuration.properties['pulley.checkIntervalMinutes'];
+	assert.deepEqual(
+		{ ...interval, markdownDescription: undefined },
+		{ type: 'number', default: 15, minimum: 5, maximum: 240, scope: 'application', markdownDescription: undefined },
+	);
+	assert.equal(interval.markdownDescription, copy.checkIntervalDescription);
+	assert.deepEqual(Object.keys(pkg.contributes.configuration.properties), ['pulley.checkIntervalMinutes']);
+	assert.equal(pkg.contributes.keybindings, undefined, 'no custom keyboard shortcut');
 	assert.deepEqual(pkg.contributes.menus.commandPalette, [
 		{ command: 'pulley.openPullRequest', when: 'false' },
 		{ command: 'pulley.debugSeed', when: 'pulley.development' },
@@ -55,6 +69,13 @@ test('src/core has no vscode import', () => {
 	for (const file of files) {
 		const source = readFileSync(join(root, 'src', 'core', file), 'utf8');
 		assert.doesNotMatch(source, /from\s+['"]vscode['"]|require\(\s*['"]vscode['"]\s*\)/);
+	}
+});
+
+test('src/core has no timers, Math.random, or clock reads', () => {
+	for (const file of readdirSync(join(root, 'src', 'core')).filter((f) => f.endsWith('.ts'))) {
+		const source = readFileSync(join(root, 'src', 'core', file), 'utf8');
+		assert.doesNotMatch(source, /\bset(Timeout|Interval|Immediate)\s*\(|Math\.random|Date\.now|new Date\(|performance\.now/, file);
 	}
 });
 

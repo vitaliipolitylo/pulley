@@ -7,6 +7,8 @@ export const copy = {
 	queueViewName: 'Review Queue',
 	connectCommandTitle: 'Connect to GitHub',
 	openPullRequestCommandTitle: 'Open Pull Request',
+	refreshCommandTitle: 'Refresh review requests',
+	checkIntervalDescription: 'How often Pulley checks GitHub for review requests, in minutes (5–240).',
 	debugSeedCommandTitle: 'Debug Seed',
 	outputChannelName: 'Pulley',
 
@@ -22,6 +24,8 @@ export const copy = {
 	incomplete: 'GitHub returned only part of the results, so this list may be incomplete.',
 	failed: "Couldn't check GitHub.",
 	stale: "Couldn't check GitHub. Showing the last known requests.",
+	/** Appended to the pending and clear messages once a complete check has succeeded (Story 1.5). */
+	lastChecked: (time: string): string => `Last checked ${time}`,
 	updatePulley: 'This data was saved by a newer version of Pulley. Update Pulley to see your review queue.',
 
 	// Request age phrases (Story 1.4). Formatted only in viewModel, from `now - requestedAt`.
@@ -72,6 +76,13 @@ export const copy = {
 		openFailed: (reason: string): string => `Opening the pull request failed: ${reason}`,
 		debugSeeded: (n: number): string => `Debug seed wrote ${n} synthetic items.`,
 		debugSeedFailed: (reason: string): string => `Debug seed failed: ${reason}`,
+		checkTriggered: (kind: string, delayMs: number): string =>
+			delayMs > 0 ? `Check trigger: ${kind} (starting in ${Math.round(delayMs / 1000)} s).` : `Check trigger: ${kind}.`,
+		checkJoined: (kind: string): string => `Check trigger: ${kind} joined the check already in progress.`,
+		checkCrashed: (reason: string): string => `Check ended unexpectedly: ${reason}`,
+		intervalClamped: (raw: string, minutes: number): string =>
+			`pulley.checkIntervalMinutes ${raw} is out of range (5–240); using ${minutes}.`,
+		intervalRestarted: (minutes: number): string => `Check interval is ${minutes} min; the timer restarted.`,
 	},
 } as const;
 
