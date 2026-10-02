@@ -6,6 +6,8 @@ import { QueueView, type QueueTreeView } from '../../src/shell/queueView.ts';
 function fakes() {
 	let messageWrites = 0;
 	let message: string | undefined = 'initial';
+	let descriptionWrites = 0;
+	let description: string | undefined;
 	const tree: QueueTreeView = {
 		get message() {
 			return message;
@@ -13,6 +15,13 @@ function fakes() {
 		set message(value) {
 			messageWrites++;
 			message = value;
+		},
+		get description() {
+			return description;
+		},
+		set description(value) {
+			descriptionWrites++;
+			description = value;
 		},
 		dispose: () => {},
 	};
@@ -22,7 +31,7 @@ function fakes() {
 	});
 	let refreshes = 0;
 	view.provider.onDidChangeTreeData(() => refreshes++);
-	return { tree, context, view, counts: () => ({ messageWrites, refreshes }) };
+	return { tree, context, view, counts: () => ({ messageWrites, refreshes }), descriptionWrites: () => descriptionWrites };
 }
 
 const row = (n: number): Row => ({
@@ -106,7 +115,7 @@ suite('QueueView', () => {
 
 	test('matrix "Unchanged poll": the same model rendered three times sets message and refreshes the tree only once', async () => {
 		for (const model of [
-			pending([row(1)], '1 review is waiting. Last checked 9:00 AM'),
+			{ ...pending([row(1)], '1 review is waiting.'), lastChecked: 'Last checked 9:00 AM' } satisfies ViewModel,
 			{ status: 'stale', action: 'refresh', count: null, message: stale, rows: [row(1)] } satisfies ViewModel,
 			{ status: 'unconnected', reason: 'unauthenticated', action: 'reconnect', count: null, message: stale, rows: [row(1)] } satisfies ViewModel,
 		]) {
@@ -118,6 +127,16 @@ suite('QueueView', () => {
 			assert.deepStrictEqual(counts(), { messageWrites: 1, refreshes: 1 }, model.status);
 			assert.strictEqual(context.length, 1);
 		}
+	});
+
+	test('screen reader: three successful polls that only move the check time never re-set the message', async () => {
+		const { tree, view, counts, descriptionWrites } = fakes();
+		for (const time of ['9:00 AM', '9:15 AM', '9:30 AM']) {
+			await view.render({ ...pending([row(1)], '1 review is waiting.'), lastChecked: `Last checked ${time}` });
+		}
+		assert.deepStrictEqual(counts(), { messageWrites: 1, refreshes: 1 });
+		assert.strictEqual(descriptionWrites(), 3, 'the time moves in the view description');
+		assert.strictEqual(tree.description, 'Last checked 9:30 AM');
 	});
 
 	test('the same message string is never re-set, even when other fields change', async () => {

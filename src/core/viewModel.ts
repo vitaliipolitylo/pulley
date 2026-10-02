@@ -114,9 +114,8 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 
 	const rows = rowsOf(account, ctx.now);
 	const n = rows.length;
-	/** " Last checked {time}" once a complete check has succeeded; nothing before that. */
-	const lastChecked = (message: string): string =>
-		lastSuccessTime === undefined ? message : `${message} ${copy.lastChecked(lastSuccessTime)}`;
+	/** "Last checked {time}" (the view description) once a complete check has succeeded. */
+	const checked = lastSuccessTime === undefined ? {} : { lastChecked: copy.lastChecked(lastSuccessTime) };
 
 	const failure = account.lastFailure;
 	if (failure && failure.at > (lastSuccessAt ?? 0)) {
@@ -136,10 +135,10 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 			lastSuccessAt === undefined ||
 			(account.lastIncompleteFetchStartedAt !== undefined && account.lastIncompleteFetchStartedAt > lastSuccessAt);
 		const message = incomplete ? `${copy.pending(n)} ${copy.incomplete}` : copy.pending(n);
-		return { status: 'pending', count: lastSuccessAt === undefined ? null : n, message: lastChecked(message), rows };
+		return { status: 'pending', count: lastSuccessAt === undefined ? null : n, message, ...checked, rows };
 	}
 	if (lastSuccessAt !== undefined) {
-		return { status: 'clear', count: 0, message: lastChecked(copy.clear), rows };
+		return { status: 'clear', count: 0, message: copy.clear, ...checked, rows };
 	}
 	// Only incomplete successes that returned nothing (or none yet): never show a zero.
 	const message = account.firstCheckDone && !window.checking ? copy.incomplete : copy.checking;

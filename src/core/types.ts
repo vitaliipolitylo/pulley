@@ -129,5 +129,10 @@ export interface ViewModel {
 	count: number | null;
 	/** TreeView.message. Undefined while the welcome content explains (unconnected with no rows). */
 	message?: string;
+	/**
+	 * TreeView.description: "Last checked {time}" for pending and clear once a complete check has
+	 * succeeded. Kept out of `message` so a poll that only moves the time re-announces nothing.
+	 */
+	lastChecked?: string;
 	rows: Row[];
 }

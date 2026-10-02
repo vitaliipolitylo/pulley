@@ -88,7 +88,7 @@ export function connectionContextKey(model: ViewModel): ConnectionContextKey {
 }
 
 /** The parts of a TreeView that QueueView touches; injectable for tests. */
-export type QueueTreeView = Pick<vscode.TreeView<Row>, 'message' | 'dispose'>;
+export type QueueTreeView = Pick<vscode.TreeView<Row>, 'message' | 'description' | 'dispose'>;
 export type SetContext = (key: string, value: unknown) => Thenable<unknown>;
 
 const defaultSetContext: SetContext = (key, value) => vscode.commands.executeCommand('setContext', key, value);
@@ -123,6 +123,11 @@ export class QueueView implements vscode.Disposable {
 		}
 		if (!previous || previous.message !== model.message) {
 			this.treeView.message = model.message;
+		}
+		// The check time lives in the view header, not the message, so a poll that only moves
+		// the time never re-sets the message.
+		if (!previous || previous.lastChecked !== model.lastChecked) {
+			this.treeView.description = model.lastChecked;
 		}
 		const key = connectionContextKey(model);
 		if (key !== this.contextKey) {

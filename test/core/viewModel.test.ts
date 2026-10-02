@@ -78,7 +78,8 @@ test('pending after a complete success: count and firm message', () => {
 	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5, items: items(tracked('A', 1), tracked('B', 2)) }), win(), { now: NOW, formatTime });
 	assert.equal(m.status, 'pending');
 	assert.equal(m.count, 2);
-	assert.equal(m.message, '2 reviews are waiting. Last checked t5');
+	assert.equal(m.message, '2 reviews are waiting.');
+	assert.equal(m.lastChecked, 'Last checked t5');
 	assert.deepEqual(m.rows[0], {
 		id: 'A',
 		label: 'Fix A',
@@ -105,13 +106,15 @@ test('pending with a newer incomplete success than the last complete one: count 
 	);
 	assert.equal(m.status, 'pending');
 	assert.equal(m.count, 2);
-	assert.equal(m.message, `2 reviews are waiting. ${copy.incomplete} Last checked t5`);
+	assert.equal(m.message, `2 reviews are waiting. ${copy.incomplete}`);
+	assert.equal(m.lastChecked, 'Last checked t5');
 	const older = viewModel(
 		withAccount({ firstCheckDone: true, lastSuccessAt: 8, lastIncompleteFetchStartedAt: 5, items: items(tracked('A', 1)) }),
 		win(),
 		{ now: NOW, formatTime },
 	);
-	assert.equal(older.message, '1 review is waiting. Last checked t8');
+	assert.equal(older.message, '1 review is waiting.');
+	assert.equal(older.lastChecked, 'Last checked t8');
 });
 
 test('restart with stored items before any check completes renders the stored rows, no zero', () => {
@@ -123,7 +126,7 @@ test('restart with stored items before any check completes renders the stored ro
 
 test('clear only after a complete success with no items', () => {
 	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5 }), win(), { now: NOW, formatTime });
-	assert.deepEqual(m, { status: 'clear', count: 0, message: `${copy.clear} Last checked t5`, rows: [] });
+	assert.deepEqual(m, { status: 'clear', count: 0, message: copy.clear, lastChecked: 'Last checked t5', rows: [] });
 });
 
 test('stale with rows: lastFailure newer than lastSuccessAt keeps rows', () => {
@@ -273,20 +276,22 @@ test('long title and repository: tooltip and accessible label carry the full tex
 // Story 1.5: last-checked text.
 // ---------------------------------------------------------------------------
 
-test('last checked: pending reads "{n} reviews are waiting. Last checked {time}" via ctx.formatTime(lastSuccessAt)', () => {
+test('last checked: pending reads "{n} reviews are waiting." with "Last checked {time}" as the description, via ctx.formatTime(lastSuccessAt)', () => {
 	const seen: number[] = [];
 	const fmt = (ms: number): string => {
 		seen.push(ms);
 		return '3:04 PM';
 	};
 	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 42, items: items(tracked('A', 1), tracked('B', 2)) }), win(), { now: NOW, formatTime: fmt });
-	assert.equal(m.message, '2 reviews are waiting. Last checked 3:04 PM');
+	assert.equal(m.message, '2 reviews are waiting.');
+	assert.equal(m.lastChecked, 'Last checked 3:04 PM');
 	assert.deepEqual(seen, [42]);
 });
 
-test('last checked: clear reads the clear sentence plus " Last checked {time}"', () => {
+test('last checked: clear reads the clear sentence with "Last checked {time}" as the description', () => {
 	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 42 }), win(), { now: NOW, formatTime: () => '9:00 AM' });
-	assert.equal(m.message, 'No reviews are waiting in repositories visible to this GitHub sign-in. Last checked 9:00 AM');
+	assert.equal(m.message, 'No reviews are waiting in repositories visible to this GitHub sign-in.');
+	assert.equal(m.lastChecked, 'Last checked 9:00 AM');
 });
 
 test('last checked: absent until lastSuccessAt exists (loading, incomplete-only pending, failure without success)', () => {
@@ -303,6 +308,7 @@ test('last checked: absent until lastSuccessAt exists (loading, incomplete-only 
 	for (const stored of cases) {
 		const m = viewModel(stored, win(), { now: NOW, formatTime: never });
 		assert.doesNotMatch(m.message ?? '', /Last checked/);
+		assert.equal(m.lastChecked, undefined);
 	}
 });
 
@@ -316,7 +322,8 @@ test('last checked: a failed check newer than the last success leaves lastSucces
 		return `t${ms}`;
 	};
 	const before = viewModel(succeeded, win(), { now: NOW, formatTime: fmt });
-	assert.equal(before.message, '1 review is waiting. Last checked t5');
+	assert.equal(before.message, '1 review is waiting.');
+	assert.equal(before.lastChecked, 'Last checked t5');
 
 	const failed = reconcile(succeeded, { ok: false, accountId: 'Y', fetchStartedAt: 20, reason: 'network' }, rctx).stored;
 	assert.equal(failed.accounts.Y.lastSuccessAt, 5, 'a failure never moves lastSuccessAt');
@@ -436,7 +443,8 @@ test('unauthenticated with rows but no prior success: unavailable message with R
 test('the clear copy includes the visibility sentence', () => {
 	const m = viewModel(withAccount({ firstCheckDone: true, lastSuccessAt: 5 }), win(), { now: NOW, formatTime });
 	assert.equal(m.status, 'clear');
-	assert.match(m.message!, /^No reviews are waiting in repositories visible to this GitHub sign-in\. Last checked t5$/);
+	assert.match(m.message!, /^No reviews are waiting in repositories visible to this GitHub sign-in\.$/);
+	assert.equal(m.lastChecked, 'Last checked t5');
 	assert.match(copy.unauthenticatedExplanation, /Only repositories visible to this GitHub sign-in are included\./);
 });
 
@@ -476,7 +484,7 @@ test('recovery to empty: a complete success with no items after a failure is cle
 	const failed = withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason: 'network' }, items: items(tracked('A', 1)) });
 	const recovered = reconcile(failed, { ok: true, accountId: 'Y', fetchStartedAt: 20, complete: true, items: [] }, rctx).stored;
 	const m = viewModel(recovered, win(), { now: NOW, formatTime });
-	assert.deepEqual(m, { status: 'clear', count: 0, message: `${copy.clear} Last checked t20`, rows: [] });
+	assert.deepEqual(m, { status: 'clear', count: 0, message: copy.clear, lastChecked: 'Last checked t20', rows: [] });
 });
 
 test("account switch: the previous account's rows never render for the new account", () => {
@@ -490,4 +498,12 @@ test("account switch: the previous account's rows never render for the new accou
 	const m = viewModel(stored, win({ connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 4 } }), { now: NOW, formatTime });
 	assert.equal(m.status, 'clear');
 	assert.deepEqual(m.rows, []);
+});
+
+test('screen reader: successful polls that only move the check time leave the message unchanged', () => {
+	const at = (lastSuccessAt: number) =>
+		viewModel(withAccount({ firstCheckDone: true, lastSuccessAt, items: items(tracked('A', 1)) }), win(), { now: NOW, formatTime });
+	const polls = [at(5), at(20), at(35)];
+	assert.deepEqual(new Set(polls.map((m) => m.message)).size, 1, 'one message across three polls');
+	assert.deepEqual(polls.map((m) => m.lastChecked), ['Last checked t5', 'Last checked t20', 'Last checked t35']);
 });
