@@ -2,7 +2,8 @@
 title: 'Story 2.5: Validate the experience with developers'
 type: 'chore'
 created: '2026-10-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: '4b34c0677c12e2bf16d591ade045c8c7df15d247'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -67,9 +68,9 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `docs/validation/usability-protocol.md` -- per Always.
-- [ ] `docs/validation/usability-results.md` -- an empty template with tables, the pass formula, triage, and decision.
-- [ ] `docs/dogfood/dogfood-0.1.0.md` -- links.
+- [x] `docs/validation/usability-protocol.md` -- per Always.
+- [x] `docs/validation/usability-results.md` -- an empty template with tables, the pass formula, triage, and decision.
+- [x] `docs/dogfood/dogfood-0.1.0.md` -- links.
 
 **Acceptance Criteria:**
 - Given the protocol, when a facilitator who has not read the planning docs follows it, then they can run a session end to end without asking how to set up, time, or score it.
@@ -90,3 +91,24 @@ context:
 - **2026-10-03, Epic 2 spec review fixes:** finding IDs cited inline (A1–A15 = adversarial findings 1–15, E1–E7 = edge-case findings 1–7) refer to `review-epic-2-specs-2026-10-03.md`, not PRD assumptions such as A8. B- and X-IDs refer to the Review Triage Log of `spec-epic-2-spec-review-fixes.md`. This story resolves A11, E6, B8, and B9, and states the Go decision Story 2.6 requires (A12, E7).
 
 ## Review Triage Log
+
+| # | Source | Finding | Verdict | Evidence | Route |
+|---|---|---|---|---|---|
+| R1 | blind, edge | Flat TR+6:00 deadline ignores check time; a request made seconds after T0 can be logged as a false delivery failure | medium | `src/shell/scheduler.ts` re-arms the periodic timer when a check settles: start ≤ T0+5:00+<60 s jitter, plus check duration | patch: TR between T0+0:30 and T0+1:00 |
+| R2 | blind | No delivery-failure cause for a complete check that misses the new PR (search lag) | low | The cause list names only missing, failed, and partial checks | patch |
+| R3 | blind | Task 1 route not recorded; a github.com success counts as Pulley success | medium | SM-3 says "from Pulley"; results tables had no route column | patch |
+| R4 | blind | No informed-consent step | low | Consent covered screen recording only | patch |
+| R5 | blind, edge | Wrap-up never signs the GitHub account out | medium | Uninstalling leaves the session in VS Code Accounts | patch |
+| R6 | blind | Do Not Disturb turned off in Setup, never restored | low | No restore step in Wrap-up | patch |
+| R7 | blind, edge | Profile commands omit `--profile`; the application-scoped interval is shared across profiles, yet Wrap-up allowed "delete the test profile" | medium | `package.json` `pulley.checkIntervalMinutes` has `"scope": "application"` | patch |
+| R8 | blind | Output → Pulley in Setup step 9 conflicts with Panel placement | low | Output and the Review Queue share the Panel | patch |
+| R9 | edge | A participant using their own account sees the Pulley view while signing in during setup | medium | Setup step 5 had the sign-in in the Pulley view | patch |
+| R10 | edge | T0 Refresh in the view reveals the hidden view | low | Step 10 hides the view; T0 used the view button | patch |
+| R11 | edge | Replacement participant IDs fall outside P1–P5 and break the placement alternation | low | "Assign IDs in session order" plus replacement | patch |
+| R12 | edge | Optional stopping: adding sessions after a Fail can turn it into a Pass | medium | "Fewer than 3 … run more sessions" with no fixed target | patch |
+| R13 | edge | Task 2 end undefined when no notification appears | low | End row was relative to TN only | patch |
+| R14 | edge | A PR opened in an in-editor view has no Task 1 stop mark | low | Stop mark named only the browser | patch |
+| R15 | edge | "Comprehension problem" undefined for triage completeness | low | The term was used in the log and triage with no definition | patch |
+| R16 | blind, edge | With 3 sessions only one participant uses the Panel | low | Alternation P2/P4; the spec says "half" | patch: state the limit and log it |
+| R17 | edge | A Go after `fix before 2.6` specs publishes a build developers never tested | medium | Already deferred as B10 in spec 2.6's change log; not caused by this story | defer |
+| R18 | blind | The sprint-status change is missing from the reviewed diff | false | Excluded on purpose: it is workflow bookkeeping, updated to in-progress in `sprint-status.yaml` | reject |
