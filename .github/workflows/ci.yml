@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      # pretest runs the core, shell, and migration tests under Node;
+      # vscode-test then runs the host smoke tests.
+      - name: Test
+        run: xvfb-run -a npm test
+
+      - name: Package
+        run: npm run vsix
+
+      - name: Check package files
+        run: node scripts/check-package-files.mjs
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulley-vsix-${{ github.sha }}
+          path: pulley.vsix
+          if-no-files-found: error

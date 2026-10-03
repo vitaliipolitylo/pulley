@@ -77,6 +77,15 @@ test('package.json strings mirror copy.ts', () => {
 	assert.deepEqual(pkg.activationEvents, ['onStartupFinished']);
 });
 
+test('package.json fixes the extension identity', () => {
+	const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+	// globalState is keyed by the extension ID, so publisher and name never change.
+	assert.equal(pkg.publisher, 'vitaliipolitylo');
+	assert.equal(pkg.name, 'pulley');
+	assert.match(pkg.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
+	assert.equal(pkg.license, 'MIT');
+});
+
 test('src/core has no vscode import', () => {
 	const files = readdirSync(join(root, 'src', 'core')).filter((f) => f.endsWith('.ts'));
 	assert.ok(files.length > 0);

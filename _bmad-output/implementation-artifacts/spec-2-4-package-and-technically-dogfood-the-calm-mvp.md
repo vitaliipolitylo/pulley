@@ -2,7 +2,8 @@
 title: 'Story 2.4: Package and technically dogfood the calm MVP'
 type: 'chore'
 created: '2026-10-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: '6165826689251665199108436c8595f6739cbb18'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -83,12 +84,12 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `package.json`, `package-lock.json`, `.gitignore`, `.vscodeignore`, `LICENSE` -- identity, packaging, ignores, MIT license. Exclude `.github/**` and `scripts/**` from the package.
-- [ ] `scripts/check-package-files.mjs` -- the allowlist and token scan.
-- [ ] `.github/workflows/ci.yml` -- per Always.
-- [ ] `README.md`, `CHANGELOG.md` -- current behavior, install path, 0.1.0 entry.
-- [ ] `docs/dogfood/dogfood-0.1.0.md` -- build SHA field, scenario table with prerequisites and triggers, decision rule and section.
-- [ ] `test/core/connection.test.ts` -- assert that `publisher` is `vitaliipolitylo`, `version` is SemVer, and `name` is `pulley`.
+- [x] `package.json`, `package-lock.json`, `.gitignore`, `.vscodeignore`, `LICENSE` -- identity, packaging, ignores, MIT license. Exclude `.github/**` and `scripts/**` from the package.
+- [x] `scripts/check-package-files.mjs` -- the allowlist and token scan.
+- [x] `.github/workflows/ci.yml` -- per Always.
+- [x] `README.md`, `CHANGELOG.md` -- current behavior, install path, 0.1.0 entry.
+- [x] `docs/dogfood/dogfood-0.1.0.md` -- build SHA field, scenario table with prerequisites and triggers, decision rule and section.
+- [x] `test/core/connection.test.ts` -- assert that `publisher` is `vitaliipolitylo`, `version` is SemVer, and `name` is `pulley`.
 
 **Acceptance Criteria:**
 - Given a clean checkout, when `npm ci && npm run vsix && node scripts/check-package-files.mjs` runs, then `pulley.vsix` is produced with version 0.1.0 and ID `vitaliipolitylo.pulley`, and the check passes.
@@ -108,8 +109,30 @@ context:
 
 ## Implementation Notes
 
+- **Repository URL (supplied by the human, 2026-10-03):** `https://github.com/vitaliipolitylo/pulley`. Use it for `package.json` `repository` (and any README/CHANGELOG links). The repository may not exist yet; CI confirmation waits for the first green run there.
+
 ## Spec Change Log
 
 - **2026-10-03, Epic 2 spec review fixes:** finding IDs cited inline (A1–A15 = adversarial findings 1–15, E1–E7 = edge-case findings 1–7) refer to `review-epic-2-specs-2026-10-03.md`, not PRD assumptions such as A8. B- and X-IDs refer to the Review Triage Log of `spec-epic-2-spec-review-fixes.md`. This story resolves A10, B6, B7, and B12, and records that dogfood builds stay `0.1.0` (A13).
 
 ## Review Triage Log
+
+| # | Layer | Finding | Verdict | Evidence | Route |
+|---|---|---|---|---|---|
+| 1 | blind, edge | Check scans `vsce ls` and on-disk `dist/extension.js`, not the built `pulley.vsix` | low | True only if `dist` is rebuilt between `npm run vsix` and the check; CI runs them back to back, and the spec specifies `vsce ls` plus the bundle. Fix (unzip the `.vsix`) adds complexity | reject |
+| 2 | blind, edge | Token scan misses `ghs_`, `ghu_`, `ghr_` prefixes | low | Real gap; the bundle has no such strings today, so extending the prefix check is a direct correction | patch |
+| 3 | blind | Bearer pattern can false-positive on bundled prose; failures print no location | low | The current bundle passes, and a future false positive fails loudly in CI | reject |
+| 4 | blind, edge | `vsce ls` failure throws an uncaught stack trace | false | That is a loud failure on an invalid manifest, which is correct behavior for a CI guard | reject |
+| 5 | blind | README install skips unzipping the CI artifact and the minimum VS Code version | low | GitHub serves artifacts as zips; `engines.vscode` is `^1.138.0`. Doc correction | patch |
+| 6 | blind | CI artifact name isn't tied to the commit SHA the checklist must record | low | The checklist needs the build SHA; naming the artifact by `github.sha` is a one-line fix | patch |
+| 7 | blind | Workflow duplicates compile/lint and has no timeout, concurrency, or VS Code cache | low | The compile step is required by the spec; the rest is tuning with no user harm | reject |
+| 8 | blind | Dogfood checklist misses some shipped behaviors (next-day reminder, offline recovery, focus hold, Open action, corgi states) | low | The frozen intent fixes the scenario table; these behaviors have unit/smoke coverage from Stories 1.x–2.3 | reject |
+| 9 | blind | Checklist doesn't record the check interval used in scenario 3 | low | Scenario 3's wait depends on it; adding a header field is trivial | patch |
+| 10 | blind | Spec status and sprint-status disagree; CI evidence not recorded | false | Sprint status is synced at presentation; CI confirmation is a listed manual check | reject |
+| 11 | blind | CHANGELOG claims Keep a Changelog but `0.1.0` has no date | low | Direct heading correction | patch |
+| 12 | blind | Identity test doesn't assert `repository.url` or `.vscodeignore` exclusions | low | The spec's test task names publisher, SemVer, and name; the package check enforces the exclusions | reject |
+| 13 | blind | No `bugs`, `homepage`, or PNG `icon` | false | vsce derives bugs/homepage from a GitHub `repository`; icon and support path belong to Story 2.6 | reject |
+| 14 | edge | Tokens in README/CHANGELOG/package.json/media aren't scanned | low | The spec scopes the scan to the bundle; those are human-written files reviewed in the diff | reject |
+| 15 | edge | vsce writes `::warning::` to stdout under GITHUB_ACTIONS, which the check would read as a file path | low | `vsce ls` emits no warnings on the current manifest (`ls` skips `printAndValidatePackagedFiles`), and any such case fails loudly | reject |
+| 16 | edge | README `[LICENSE](LICENSE)` link becomes a 404 GitHub URL while the repository doesn't exist | low | Resolves once the repository is pushed, which CI already requires | reject |
+| 17 | verification-gap | The check script's failure branches never run under any test | medium | Filed as a gap (pre-verified); a self-test needs the matching logic extracted into an importable helper | defer |

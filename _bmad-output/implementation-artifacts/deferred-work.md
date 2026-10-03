@@ -47,3 +47,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-read-queue-state-at-a-glance.md`
   summary: The badge render and pulley.backlogThreshold re-render wiring in activate() has no test at its consumer.
   evidence: Removing statusCount.render, hard-coding threshold 5, or deleting the THRESHOLD_SETTING branch passes every test; needs an activation-level harness with an injectable session.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-package-and-technically-dogfood-the-calm-mvp.md`
+  summary: Add a self-test for `scripts/check-package-files.mjs` so its allowlist and token-scan failure branches are exercised (out-of-allowlist path, `gh*_`/`github_pat_`/literal Bearer in the bundle, and `bearer ${...}` placeholders passing).
+  evidence: No test under `test/` references the script; CI only runs it on an already-clean package, so a loosened allowlist or broken pattern would pass silently. Requires extracting the matching into an importable helper with fixtures under `test/shell/`.

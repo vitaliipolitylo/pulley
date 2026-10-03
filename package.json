@@ -2,7 +2,13 @@
   "name": "pulley",
   "displayName": "Pulley",
   "description": "A quiet queue of GitHub review requests waiting for you.",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "publisher": "vitaliipolitylo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitaliipolitylo/pulley.git"
+  },
   "engines": {
     "vscode": "^1.138.0"
   },
@@ -134,19 +140,21 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src test",
     "test": "vscode-test",
-    "test:core": "node --test \"test/core/**/*.test.ts\" \"test/shell/**/*.test.ts\""
+    "test:core": "node --test \"test/core/**/*.test.ts\" \"test/shell/**/*.test.ts\"",
+    "vsix": "vsce package --out pulley.vsix"
   },
   "devDependencies": {
-    "@types/vscode": "^1.138.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
-    "eslint": "^10.5.0",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "4.0.0",
     "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
     "npm-run-all": "^4.1.5",
     "typescript": "^6.0.3",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",

@@ -21,3 +21,8 @@ _bmad-output/**
 .opencode/**
 .uv-cache/**
 docs/**
+.github/**
+scripts/**
+mockups/**
+package-lock.json
+*.vsix
