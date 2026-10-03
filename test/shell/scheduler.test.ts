@@ -12,6 +12,8 @@ import {
 	createQueueCheck,
 	createScheduler,
 	formatCheckTime,
+	localDate,
+	nextStartupReminderDue,
 	JITTER_MAX_MS,
 	MAX_GENERATION_ATTEMPTS,
 	nextConnection,
@@ -467,7 +469,7 @@ test('nextConnection: other results leave the connection unchanged', () => {
 
 test('chain: a 401 applied via nextConnection + reconcile + viewModel keeps the rows and offers reconnect', () => {
 	const item = { id: 'PR_1', repo: 'octo/app', number: 1, title: 'Fix', author: 'bob', url: 'https://github.com/octo/app/pull/1' };
-	const rctx = { now: 10, activeAccountId: 'A', intervalMs: 15 * MIN, windowFocused: false };
+	const rctx = { now: 10, activeAccountId: 'A', intervalMs: 15 * MIN, windowFocused: false, today: '2026-10-03', startupReminderDue: false };
 	const succeeded = reconcile({ schemaVersion: 1, accounts: {} }, { ok: true, accountId: 'A', fetchStartedAt: 5, complete: true, items: [item] }, rctx).stored;
 	const failure: CheckResult = { ok: false, accountId: 'A', fetchStartedAt: 9, reason: 'unauthenticated' };
 	const connection = nextConnection(connectedA, failure, 3);
@@ -496,4 +498,26 @@ test('connectPlan: a cancelled forced Reconnect keeps the current state; a plain
 	assert.deepEqual(connectPlan(unauthA).map(found), found);
 	assert.deepEqual(connectPlan(signedOut).map(cancelled), cancelled);
 	assert.deepEqual(connectPlan(signedOut).map(found), found);
+});
+
+test('localDate: the local calendar day as YYYY-MM-DD, zero-padded (TZ-independent: built from local fields)', () => {
+	assert.equal(localDate(new Date(2026, 9, 3, 12, 0).getTime()), '2026-10-03');
+	assert.equal(localDate(new Date(2026, 0, 5, 0, 0).getTime()), '2026-01-05');
+	assert.equal(localDate(new Date(2026, 11, 31, 23, 59, 59, 999).getTime()), '2026-12-31');
+	assert.match(localDate(Date.now()), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('localDate: local midnight starts the next day', () => {
+	const midnight = new Date(2026, 9, 4, 0, 0).getTime();
+	assert.equal(localDate(midnight - 1), '2026-10-03');
+	assert.equal(localDate(midnight), '2026-10-04');
+});
+
+test('nextStartupReminderDue: cleared only by a report with reminderEvaluated true', () => {
+	assert.equal(nextStartupReminderDue(true, { reminderEvaluated: true }), false);
+	assert.equal(nextStartupReminderDue(true, { reminderEvaluated: false }), true);
+	assert.equal(nextStartupReminderDue(true, undefined), true, 'read-only mode keeps the flag');
+	assert.equal(nextStartupReminderDue(false, { reminderEvaluated: false }), false);
+	assert.equal(nextStartupReminderDue(false, { reminderEvaluated: true }), false);
+	assert.equal(nextStartupReminderDue(false, undefined), false);
 });

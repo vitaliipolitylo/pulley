@@ -49,7 +49,10 @@ export type Origin = 'new' | 'backlog';
 /** Per-item alert state (AD-9): a new item is `'pending'` until a focused window marks it `'shown'`. */
 export type AlertState = 'none' | 'pending' | 'shown';
 
-/** Backlog reminder state (AD-8). Epic 1 writes only `'none'`. */
+/**
+ * Backlog reminder state (AD-8). `reconcile` sets `'pending'` (first connection, or at most one
+ * ongoing reminder per local day); a focused window's delivery marks it `'shown'`.
+ */
 export type BacklogAlert = 'none' | { state: 'pending' | 'shown'; firstConnection: boolean };
 
 /** One outstanding request as stored: the latest `RequestItem` fields plus core-owned fields. */
@@ -71,7 +74,10 @@ export interface Account {
 	/** `fetchStartedAt` of the newest applied incomplete success (Story 1.3 addition). */
 	lastIncompleteFetchStartedAt?: number;
 	lastFailure?: { at: number; reason: FailureReason };
-	/** Local `YYYY-MM-DD` of the last backlog reminder (Epic 2). */
+	/**
+	 * Local `YYYY-MM-DD` of the last backlog reminder: the decision day when it became pending, then
+	 * the delivery day once it is shown (Story 2.2).
+	 */
 	lastBacklogReminderDate?: string;
 	backlogAlert: BacklogAlert;
 	/**
@@ -95,10 +101,14 @@ export type Effect =
 	| { kind: 'notifyNew'; accountId: string; itemId: string }
 	| { kind: 'notifyBacklog'; accountId: string; count: number; firstConnection: boolean };
 
-/** Every durable change: `(stored, input, ctx) → { stored, effects }`. */
-export interface TransitionResult {
+/**
+ * Every durable change: `(stored, input, ctx) → { stored, effects, report? }`. `report` is window
+ * information for the shell (never stored); `store.mutate` resolves to it after the write.
+ */
+export interface TransitionResult<R = unknown> {
 	stored: Stored;
 	effects: Effect[];
+	report?: R;
 }
 
 // ---------------------------------------------------------------------------

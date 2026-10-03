@@ -112,7 +112,28 @@ const badAlertFields: Array<[string, unknown, RegExp]> = [
 	['lastAttemptIntervalMs is zero', acct({ lastAttemptIntervalMs: 0 }), /invalid lastAttemptIntervalMs/],
 	['lastAttemptIntervalMs is negative', acct({ lastAttemptIntervalMs: -1 }), /invalid lastAttemptIntervalMs/],
 	['lastAttemptIntervalMs is null', acct({ lastAttemptIntervalMs: null }), /invalid lastAttemptIntervalMs/],
+	// Story 2.2: backlog reminder fields.
+	['backlogAlert is missing', acct({ backlogAlert: undefined }), /invalid backlogAlert/],
+	['backlogAlert is an unknown string', acct({ backlogAlert: 'pending' }), /invalid backlogAlert/],
+	['backlogAlert has an unknown state', acct({ backlogAlert: { state: 'sent', firstConnection: false } }), /invalid backlogAlert/],
+	['backlogAlert has no firstConnection', acct({ backlogAlert: { state: 'pending' } }), /invalid backlogAlert/],
+	['backlogAlert firstConnection is not boolean', acct({ backlogAlert: { state: 'shown', firstConnection: 'yes' } }), /invalid backlogAlert/],
+	['backlogAlert is null', acct({ backlogAlert: null }), /invalid backlogAlert/],
+	['lastBacklogReminderDate is a number', acct({ lastBacklogReminderDate: 20261003 }), /invalid lastBacklogReminderDate/],
+	['lastBacklogReminderDate is not YYYY-MM-DD', acct({ lastBacklogReminderDate: '2026-1-3' }), /invalid lastBacklogReminderDate/],
+	['lastBacklogReminderDate is a timestamp string', acct({ lastBacklogReminderDate: '2026-10-03T00:00' }), /invalid lastBacklogReminderDate/],
 ];
+
+test('Story 2.2: every valid backlogAlert and a YYYY-MM-DD lastBacklogReminderDate are accepted as-is', () => {
+	const alerts = ['none', ...['pending', 'shown'].flatMap((state) => [true, false].map((firstConnection) => ({ state, firstConnection })))];
+	for (const backlogAlert of alerts) {
+		const raw = acct({ backlogAlert, lastBacklogReminderDate: '2026-10-03' });
+		const result = migrate(raw);
+		assert.ok(!result.readOnly);
+		assert.equal(result.malformed, undefined);
+		assert.equal(result.stored, raw);
+	}
+});
 
 for (const [name, raw, problem] of badAlertFields) {
 	test(`malformed alert field (${name}) is empty v1 with a named problem`, () => {

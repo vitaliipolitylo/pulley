@@ -35,6 +35,21 @@ const ALERT_STATES: ReadonlySet<unknown> = new Set<AlertState>(['none', 'pending
 
 const ACCOUNT_TIMESTAMPS = ['lastAttemptAt', 'lastSuccessAt', 'lastAppliedFetchStartedAt', 'lastIncompleteFetchStartedAt'] as const;
 
+/** A local calendar day as `YYYY-MM-DD`. */
+const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** `'none'`, or `{ state: 'pending' | 'shown', firstConnection: boolean }` (AD-8). */
+function isBacklogAlert(value: unknown): boolean {
+	if (value === 'none') {
+		return true;
+	}
+	return (
+		isRecord(value) &&
+		(value.state === 'pending' || value.state === 'shown') &&
+		typeof value.firstConnection === 'boolean'
+	);
+}
+
 /** A finite epoch-ms number that Date can represent. */
 function isTimestamp(value: unknown): boolean {
 	return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= MAX_EPOCH_MS;
@@ -50,6 +65,13 @@ function accountFieldProblem(account: Record<string, unknown>): string | undefin
 	const interval = account.lastAttemptIntervalMs;
 	if (interval !== undefined && !(typeof interval === 'number' && Number.isFinite(interval) && interval > 0)) {
 		return 'an account has an invalid lastAttemptIntervalMs';
+	}
+	const date = account.lastBacklogReminderDate;
+	if (date !== undefined && !(typeof date === 'string' && LOCAL_DATE.test(date))) {
+		return 'an account has an invalid lastBacklogReminderDate';
+	}
+	if (!isBacklogAlert(account.backlogAlert)) {
+		return 'an account has an invalid backlogAlert';
 	}
 	const failure = account.lastFailure;
 	if (failure !== undefined) {

@@ -1,6 +1,6 @@
 // Native notifications for alert effects (AD-9). No `vscode` import: the message API, URL opener,
-// and log are injected. The notifier never decides whether to notify; it runs the effects that a
-// core transition emitted after the store wrote them.
+// queue reveal, clock, and log are injected. The notifier never decides whether to notify; it runs
+// the effects that a core transition emitted after the store wrote them.
 import { shortReason } from '../core/connection.ts';
 import { copy } from '../core/copy.ts';
 import type { Effect, Stored, Tracked } from '../core/types.ts';
@@ -15,6 +15,10 @@ export interface NotifierDeps {
 	showMessage(text: string, button: string): PromiseLike<string | undefined>;
 	/** Opens a PR URL (the shell passes `openPullRequest`, which keeps the https://github.com/ guard). */
 	openUrl(url: string): unknown;
+	/** Reveals the review queue (`pulley.queue.focus`): the backlog notification's button. */
+	focusQueue(): unknown;
+	/** The local `YYYY-MM-DD` when the effect runs: picks the backlog line. */
+	today(): string;
 	log(line: string): void;
 }
 
@@ -60,13 +64,42 @@ export function createNotifier(deps: NotifierDeps): EffectRunner {
 		);
 	};
 
+	const notifyBacklog = (effect: Extract<Effect, { kind: 'notifyBacklog' }>): void => {
+		// Logs carry the count only (A7).
+		const subject = copy.log.backlogSubject(effect.count);
+		const button = copy.openReviewQueue;
+		let shown: PromiseLike<string | undefined>;
+		try {
+			shown = deps.showMessage(copy.backlogNotification(effect.count, deps.today()), button);
+		} catch {
+			deps.log(copy.log.notifyFailed(subject));
+			return;
+		}
+		deps.log(copy.log.notifiedBacklog(effect.count));
+		Promise.resolve(shown).then(
+			(choice) => {
+				// Dismissal (undefined) changes nothing; the button reveals the queue.
+				if (choice === button) {
+					Promise.resolve()
+						.then(() => deps.focusQueue())
+						.catch((error: unknown) => deps.log(copy.log.focusQueueFailed(shortReason(error))));
+				}
+			},
+			() => deps.log(copy.log.notifyFailed(subject)),
+		);
+	};
+
 	return (effects, stored) => {
 		for (const effect of effects) {
 			try {
 				if (effect.kind === 'notifyNew') {
 					notifyNew(effect, stored);
+				} else if (effect.kind === 'notifyBacklog') {
+					notifyBacklog(effect);
+				} else {
+					const unknown: never = effect;
+					throw new Error(`unknown effect ${(unknown as Effect).kind}`);
 				}
-				// `notifyBacklog` is delivered from Story 2.2; no transition emits it yet.
 			} catch (error) {
 				// Never let one effect stop the rest, and never reject the runner.
 				deps.log(copy.log.effectsFailed(shortReason(error)));
@@ -78,6 +111,8 @@ export function createNotifier(deps: NotifierDeps): EffectRunner {
 export interface FocusDeliveryDeps {
 	store: Pick<Store, 'mutate'>;
 	isFocused(): boolean;
+	/** The local `YYYY-MM-DD` when delivery runs: a delivered backlog reminder records it (A4). */
+	today(): string;
 	log(line: string): void;
 }
 
@@ -95,7 +130,7 @@ export interface FocusDelivery {
 export function createFocusDelivery(deps: FocusDeliveryDeps): FocusDelivery {
 	const deliver = async (activeAccountId: string | undefined): Promise<void> => {
 		try {
-			await deps.store.mutate(windowFocused, undefined, { activeAccountId });
+			await deps.store.mutate(windowFocused, undefined, { activeAccountId, today: deps.today() });
 		} catch (error) {
 			deps.log(copy.log.focusDeliveryFailed(shortReason(error)));
 		}

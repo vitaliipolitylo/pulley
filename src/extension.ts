@@ -13,7 +13,9 @@ import {
 	createQueueCheck,
 	createScheduler,
 	formatCheckTime,
+	localDate,
 	nextConnection,
+	nextStartupReminderDue,
 	type Scheduler,
 } from './shell/scheduler.ts';
 import { createAlertingStore } from './shell/alertWiring.ts';
@@ -41,6 +43,9 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 		showMessage: (text, button) => vscode.window.showInformationMessage(text, button),
 		openExternal: (uri) => vscode.env.openExternal(uri),
 		isFocused: () => vscode.window.state.focused,
+		// The backlog notification's button reveals the queue (VS Code's generated view focus command).
+		focusQueue: () => vscode.commands.executeCommand(`${QUEUE_VIEW_ID}.focus`),
+		today: () => localDate(Date.now()),
 	});
 	context.subscriptions.push(output, view);
 
@@ -56,6 +61,13 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	let latestSilentLookup: Promise<unknown> = Promise.resolve();
 	/** The last attempt to save a check result failed; cleared by the next successful save. */
 	let writeFailed = false;
+	/**
+	 * Story 2.2 (AD-8): this window may give one ongoing backlog reminder per local day. Set at
+	 * activation; cleared only when a result reports `reminderEvaluated` (a complete applied
+	 * success on the active account), so failures, partial checks, dropped or stale results,
+	 * read-only mode, and write failures keep it set.
+	 */
+	let startupReminderDue = true;
 
 	/** Waits until the newest silent lookup has settled, including ones started meanwhile. */
 	const silentLookupsSettled = async (): Promise<void> => {
@@ -98,12 +110,16 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			return;
 		}
 		try {
-			await store.mutate(reconcile, result, {
-				now: Date.now(),
+			const now = Date.now();
+			const report = await store.mutate(reconcile, result, {
+				now,
 				activeAccountId: activeAccountId(connection),
 				intervalMs: getIntervalMs(),
 				windowFocused: vscode.window.state.focused,
+				today: localDate(now),
+				startupReminderDue,
 			});
+			startupReminderDue = nextStartupReminderDue(startupReminderDue, report);
 			writeFailed = false;
 		} catch (error) {
 			// Shown in the view (stale or unavailable, with Refresh), not only logged.
@@ -249,11 +265,14 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 				}
 				const now = Date.now();
 				try {
+					// B4: Debug Seed never uses or clears the window's startup reminder.
 					await store.mutate(reconcile, fiftyResult(connection.accountId, now), {
 						now,
 						activeAccountId: connection.accountId,
 						intervalMs: getIntervalMs(),
 						windowFocused: vscode.window.state.focused,
+						today: localDate(now),
+						startupReminderDue: false,
 					});
 					log(copy.log.debugSeeded(FIFTY));
 					void vscode.window.showInformationMessage(copy.debugSeedDone(FIFTY));

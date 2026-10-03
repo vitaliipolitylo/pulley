@@ -253,6 +253,25 @@ export function createIntervalReader(read: () => unknown, log: (line: string) =>
 }
 
 /**
+ * The local calendar day of `ms` as `YYYY-MM-DD` (the `today` of every transition ctx, AD-8). Uses
+ * the machine's time zone, never UTC, so a reminder day follows the user's own midnight.
+ */
+export function localDate(ms: number): string {
+	const at = new Date(ms);
+	const pad = (n: number): string => String(n).padStart(2, '0');
+	return `${String(at.getFullYear()).padStart(4, '0')}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+/**
+ * The window's `startupReminderDue` after a reconcile mutate resolved (AD-8, A6): cleared only when
+ * the report says the reminder was evaluated. A missing report (read-only mode) keeps the flag.
+ * A rejected mutate (write failure) never reaches here, so the flag stays set.
+ */
+export function nextStartupReminderDue(flag: boolean, report: { reminderEvaluated: boolean } | undefined): boolean {
+	return flag && report?.reminderEvaluated !== true;
+}
+
+/**
  * The shell's `formatTime` for "Last checked {time}": a short time, plus a short date when
  * `ms` is not on the same local day as `now`.
  */

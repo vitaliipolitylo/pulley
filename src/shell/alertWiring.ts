@@ -16,15 +16,21 @@ export interface AlertingStoreDeps {
 	openExternal: (uri: vscode.Uri) => Thenable<boolean>;
 	/** `vscode.window.state.focused`, read per call. */
 	isFocused: () => boolean;
+	/** Reveals the review queue: `vscode.commands.executeCommand('pulley.queue.focus')`. */
+	focusQueue: () => unknown;
+	/** The local `YYYY-MM-DD` now (`localDate(Date.now())`), read per call. */
+	today: () => string;
 }
 
 export function createAlertingStore(deps: AlertingStoreDeps): { store: Store; focusDelivery: FocusDelivery } {
 	const notifier = createNotifier({
 		showMessage: deps.showMessage,
 		openUrl: (url) => openPullRequest({ url }, deps.openExternal, deps.log),
+		focusQueue: deps.focusQueue,
+		today: deps.today,
 		log: deps.log,
 	});
 	const store = createStore(deps.memento, deps.log, notifier);
-	const focusDelivery = createFocusDelivery({ store, isFocused: deps.isFocused, log: deps.log });
+	const focusDelivery = createFocusDelivery({ store, isFocused: deps.isFocused, today: deps.today, log: deps.log });
 	return { store, focusDelivery };
 }

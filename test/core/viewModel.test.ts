@@ -313,7 +313,7 @@ test('last checked: absent until lastSuccessAt exists (loading, incomplete-only 
 });
 
 test('last checked: a failed check newer than the last success leaves lastSuccessAt and its time unchanged', () => {
-	const rctx = { now: NOW, activeAccountId: 'Y', intervalMs: 15 * 60_000, windowFocused: false };
+	const rctx = { now: NOW, activeAccountId: 'Y', intervalMs: 15 * 60_000, windowFocused: false, today: '2026-10-03', startupReminderDue: false };
 	const item = { id: 'A', repo: 'octo/app', number: 7, title: 'Fix A', author: 'alice', url: 'https://github.com/octo/app/pull/A' };
 	const succeeded = reconcile({ schemaVersion: 1, accounts: {} }, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [item] }, rctx).stored;
 	const formatted: number[] = [];
@@ -480,7 +480,7 @@ test('count is null whenever status is not pending or clear; a stale count is ne
 });
 
 test('recovery to empty: a complete success with no items after a failure is clear with last checked', () => {
-	const rctx = { now: NOW, activeAccountId: 'Y', intervalMs: 15 * 60_000, windowFocused: false };
+	const rctx = { now: NOW, activeAccountId: 'Y', intervalMs: 15 * 60_000, windowFocused: false, today: '2026-10-03', startupReminderDue: false };
 	const failed = withAccount({ firstCheckDone: true, lastSuccessAt: 5, lastFailure: { at: 9, reason: 'network' }, items: items(tracked('A', 1)) });
 	const recovered = reconcile(failed, { ok: true, accountId: 'Y', fetchStartedAt: 20, complete: true, items: [] }, rctx).stored;
 	const m = viewModel(recovered, win(), { now: NOW, formatTime });

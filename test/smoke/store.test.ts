@@ -91,7 +91,7 @@ suite('Store', () => {
 		const X = { ...emptyAccount(), firstCheckDone: true, lastSuccessAt: 1, items: {} };
 		const m = controllableMemento({ schemaVersion: 1, accounts: { X } });
 		const store = createStore(m.memento, () => {});
-		const call = store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false });
+		const call = store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false, today: '2026-10-03', startupReminderDue: false });
 		await tick();
 		m.releaseNext();
 		await call;
@@ -105,7 +105,7 @@ suite('Store', () => {
 		const store = createStore(m.memento, () => {});
 		let notified = 0;
 		store.onDidChange(() => notified++);
-		await store.mutate(reconcile, { ok: false, accountId: 'X', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false });
+		await store.mutate(reconcile, { ok: false, accountId: 'X', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false, today: '2026-10-03', startupReminderDue: false });
 		assert.strictEqual(m.updates(), 0);
 		assert.strictEqual(notified, 1);
 	});
@@ -182,7 +182,7 @@ suite('Store', () => {
 		const store = createStore(m.memento, () => {}, (effects, stored) => {
 			runs.push({ effects, stored, lastEvent: m.events[m.events.length - 1] });
 		});
-		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y' });
+		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y', today: '2026-10-03' });
 		await tick();
 		await tick();
 		assert.strictEqual(runs.length, 0, 'no effects while the write is pending');
@@ -208,14 +208,16 @@ suite('Store', () => {
 				return new Promise<string | undefined>(() => {});
 			},
 			openUrl: () => undefined,
+			focusQueue: () => undefined,
+			today: () => '2026-10-03',
 			log: () => {},
 		});
 		const store = createStore(m.memento, () => {}, notifier);
 		let active = 'A';
-		const first = store.mutate(reconcile, { ok: false, accountId: 'A', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: active, intervalMs: 1, windowFocused: true });
+		const first = store.mutate(reconcile, { ok: false, accountId: 'A', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: active, intervalMs: 1, windowFocused: true, today: '2026-10-03', startupReminderDue: false });
 		await tick();
 		active = 'B';
-		const second = store.mutate(windowFocused, undefined, { activeAccountId: active });
+		const second = store.mutate(windowFocused, undefined, { activeAccountId: active, today: '2026-10-03' });
 		m.releaseNext();
 		await first;
 		assert.strictEqual(texts.length, 1);
@@ -236,7 +238,7 @@ suite('Store', () => {
 		});
 		let notified = 0;
 		store.onDidChange(() => notified++);
-		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y' });
+		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y', today: '2026-10-03' });
 		await tick();
 		m.releaseNext();
 		await call;
@@ -244,5 +246,50 @@ suite('Store', () => {
 		assert.strictEqual(notified, 1);
 		assert.strictEqual(lines.length, 1);
 		assert.match(lines[0], /runner broke/);
+	});
+	test('Story 2.2 (A6): mutate resolves to the transition report after the write and effects', async () => {
+		const m = controllableMemento({ schemaVersion: 1, accounts: {} });
+		const events: string[] = [];
+		const store = createStore(m.memento, () => {}, () => {
+			events.push('effects');
+		});
+		const call = store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [{ id: 'A', repo: 'o/r', number: 1, title: 'T', author: 'a', url: 'https://github.com/o/r/pull/1' }] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: true, today: '2026-10-03', startupReminderDue: true });
+		await tick();
+		assert.strictEqual(m.pendingWrites(), 1);
+		m.releaseNext();
+		const report = await call;
+		events.push('resolved');
+		assert.deepStrictEqual(report, { reminderEvaluated: true });
+		assert.deepStrictEqual(events, ['effects', 'resolved'], 'the first-connection reminder ran before mutate resolved');
+	});
+
+	test('Story 2.2: mutate resolves to the report when an unchanged result skips the write', async () => {
+		const m = controllableMemento({ schemaVersion: 1, accounts: {} });
+		const store = createStore(m.memento, () => {});
+		const report = await store.mutate(reconcile, { ok: false, accountId: 'X', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false, today: '2026-10-03', startupReminderDue: true });
+		assert.strictEqual(m.updates(), 0);
+		assert.deepStrictEqual(report, { reminderEvaluated: false });
+	});
+
+	test('Story 2.2: mutate resolves to undefined in read-only mode', async () => {
+		const m = controllableMemento({ schemaVersion: 2, accounts: {} });
+		const store = createStore(m.memento, () => {});
+		const report = await store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false, today: '2026-10-03', startupReminderDue: true });
+		assert.strictEqual(report, undefined);
+		assert.strictEqual(m.updates(), 0);
+	});
+
+	test('Story 2.2: a failed write rejects mutate, so no report clears the startup flag', async () => {
+		const memento: StateMemento = {
+			get: () => undefined,
+			update: async () => {
+				throw new Error('disk full');
+			},
+		};
+		const store = createStore(memento, () => {});
+		await assert.rejects(
+			store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false, today: '2026-10-03', startupReminderDue: true }),
+			/disk full/,
+		);
 	});
 });

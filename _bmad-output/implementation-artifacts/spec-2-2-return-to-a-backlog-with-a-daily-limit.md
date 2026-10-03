@@ -2,7 +2,8 @@
 title: 'Story 2.2: Return to a backlog with a daily limit'
 type: 'feature'
 created: '2026-10-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: '8c549d19d9da88b475d0a81afe57b51a3df192a7'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -110,12 +111,12 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/core/reconcile.ts`, `src/core/windowFocused.ts`, `src/core/types.ts`, `src/core/copy.ts`, `src/core/migrate.ts` -- rules, delivery-day accounting, report, copy, validation.
-- [ ] `src/shell/store.ts`, `src/shell/scheduler.ts`, `src/shell/notifier.ts`, `src/extension.ts` -- `mutate` report, `localDate`, the backlog notification with its Open Review Queue button (inject `focusQueue`), ctx and flag wiring.
-- [ ] `test/core/reconcile.test.ts`, `test/core/windowFocused.test.ts` -- one case per matrix row, including both midnight rows and `reminderEvaluated` for each result kind.
-- [ ] `test/core/copy.test.ts` (new) -- `backlogLine` is deterministic and covers every line across dates, and no line contains forbidden words (`behind`, `overdue`, `late`, `score`, `!`).
-- [ ] `test/shell/scheduler.test.ts`, `test/shell/notifier.test.ts` -- `localDate` formatting; backlog message text; the button runs `focusQueue`; dismissal is a no-op; a failed submission logs the count only.
-- [ ] `test/smoke/store.test.ts` -- `mutate` resolves to the report, including when the write is skipped; to `undefined` in read-only mode; and rejects on a write failure.
+- [x] `src/core/reconcile.ts`, `src/core/windowFocused.ts`, `src/core/types.ts`, `src/core/copy.ts`, `src/core/migrate.ts` -- rules, delivery-day accounting, report, copy, validation.
+- [x] `src/shell/store.ts`, `src/shell/scheduler.ts`, `src/shell/notifier.ts`, `src/extension.ts` -- `mutate` report, `localDate`, the backlog notification with its Open Review Queue button (inject `focusQueue`), ctx and flag wiring.
+- [x] `test/core/reconcile.test.ts`, `test/core/windowFocused.test.ts` -- one case per matrix row, including both midnight rows and `reminderEvaluated` for each result kind.
+- [x] `test/core/copy.test.ts` (new) -- `backlogLine` is deterministic and covers every line across dates, and no line contains forbidden words (`behind`, `overdue`, `late`, `score`, `!`).
+- [x] `test/shell/scheduler.test.ts`, `test/shell/notifier.test.ts` -- `localDate` formatting; backlog message text; the button runs `focusQueue`; dismissal is a no-op; a failed submission logs the count only.
+- [x] `test/smoke/store.test.ts` -- `mutate` resolves to the report, including when the write is skipped; to `undefined` in read-only mode; and rejects on a write failure.
 
 **Acceptance Criteria:**
 - Given a first connection with existing requests and a threshold of 50, when the check completes in a focused window, then exactly one aggregate notification appears and no individual ones.
@@ -134,8 +135,35 @@ context:
 
 ## Implementation Notes
 
+- `reconcile` returns `TransitionResult<ReconcileReport>`; `TransitionResult<R = unknown>` gained `report?: R`, and `Store.mutate<I, C, R>` resolves to `R | undefined`. `applySuccess` now returns `{ account, applied, addedBacklog }`; `decideReminder` runs only when `applied && result.complete`, and `reminderEvaluated` is true exactly then.
+- `decideReminder` applies the A5 pending guard to both rules (first connection included), then the zero-items guard, then first connection (`previous.lastSuccessAt === undefined`), then the ongoing rule.
+- `deliverPending(accountId, account, { focused, today })` handles the backlog branch; an emptied pending reminder becomes `none` even when unfocused (so `deliverToActive` writes it). When a reminder and new items are delivered together, `notifyBacklog` is emitted before the `notifyNew` effects (order not specified by the spec).
+- `copy.backlogLine` uses an FNV-1a hash of the `today` string. New log lines: `notifiedBacklog(count)`, `backlogSubject(count)` (the `notifyFailed` subject), and `focusQueueFailed`. None carries PR content.
+- `NotifierDeps`, `FocusDeliveryDeps` and `AlertingStoreDeps` gained `today()` (and `focusQueue()` for the notifier/factory). `extension.ts` passes `executeCommand('pulley.queue.focus')` and `localDate(Date.now())`; a smoke test checks that `pulley.queue.focus` exists in the host.
+- `extension.ts` keeps `startupReminderDue` as window memory, passes it with `today` in `applyResult`, and clears it only when the resolved report has `reminderEvaluated`. Debug Seed passes `startupReminderDue: false` and ignores the report.
+- Existing Story 2.1 tests for gap and missing-interval backlog now also expect the daily backlog reminder (no `notifyNew` still), and the Epic 1 "Before baseline" case expects a pending first-connection alert.
+
 ## Spec Change Log
 
 - **2026-10-03, Epic 2 spec review fixes:** finding IDs cited inline (A1–A15 = adversarial findings 1–15, E1–E7 = edge-case findings 1–7) refer to `review-epic-2-specs-2026-10-03.md`, not PRD assumptions such as A8. B- and X-IDs refer to the Review Triage Log of `spec-epic-2-spec-review-fixes.md`. This story resolves A2, A3, A4, A5, A6, E2, E3, E4, B1, B3, B4, X1, X2, and X8. Complete-only partial-check behavior is recorded as accepted in Design Notes.
 
 ## Review Triage Log
+
+| # | Source | Finding | Verdict | Evidence | Route |
+|---|--------|---------|---------|----------|-------|
+| 1 | verification-gap, blind | `startupReminderDue` set/clear wiring in `extension.ts` `applyResult` is not exercised by any test | medium | Pre-verified gap: only pure `reconcile` and `store.mutate` report tests exist; the closure is unreachable from smoke tests, so deleting or inverting the clear passes everything. | patch |
+| 2 | blind | Notifier `else` branch treats any non-`notifyNew` effect as a backlog reminder | low | `Effect` has two kinds today; a third would silently render as a backlog notification. Direct correction (explicit kind + `never`). | patch |
+| 3 | blind | `log.notifiedBacklog` uses "request(s)" | low | Cosmetic; neighbouring copy pluralises properly. Direct correction. | patch |
+| 4 | blind | `notifier.ts` header comment line over-long | low | Line 2 re-flowed past the wrap width. Direct correction. | patch |
+| 5 | blind | `firstConnection` carried on the effect but unused by the notifier | false | Frozen intent defines one copy (`pending(count)` + day line) for both kinds and requires the field on the effect. | reject |
+| 6 | blind | A bad `backlogAlert`/date makes migrate wipe the whole store | low | Real, but the frozen Validation rule mandates `v1Problem` rejection, matching every other account field; Epic 1 always wrote `'none'` via `emptyAccount`. Changing it changes intent. | reject |
+| 7 | blind | `LOCAL_DATE` regex accepts impossible dates like `2026-99-00` | low | Only `localDate` writes the field, so impossible values need hand-edited state; unlikely in use. | reject |
+| 8 | blind, edge-case | `!==` lets a second reminder through when the clock or time zone moves backwards | low | Real only after a westward TZ change or clock rollback on a day that already reminded; the frozen intent specifies `lastBacklogReminderDate !== today` verbatim. Rare; surfaced to the human. | reject |
+| 9 | blind | Switching accounts in a window does not re-arm the startup reminder | low | Frozen intent defines the flag as window memory cleared by the first evaluation on the active account; account switching inside a window is rare. | reject |
+| 10 | blind | Backlog count includes a pending new item that also gets `notifyNew` | false | Frozen Delivery rule defines `count: item count`; behaviour matches and is recorded in Implementation Notes. | reject |
+| 11 | blind | Debug Seed can still create first-connection or gap reminders | low | Debug-only command; frozen B4 constrains only the startup flag, which is respected. | reject |
+| 12 | blind | Random-walk test models one window only | false | The cross-window race is accepted (B3); the "Second window" row (date already today) is tested as specified. | reject |
+| 13 | blind | Notifier reads its own `today` for the line, which can drift from the recorded date at midnight | false | Frozen Notification copy says the notifier gets `today` from the shell when it runs the effect; implemented as specified. | reject |
+| 14 | edge-case | Two windows starting together can both deliver a reminder | false | The accepted cross-window race (Design Notes, B3). | reject |
+| 15 | edge-case | `today` computed before the serialized mutate, so a midnight crossing stamps yesterday | false | A reminder decided in the last ms of D and stamped D is a correct D decision; delivery re-stamps the delivery day (A4). No second reminder on any single day results. | reject |
+| 16 | edge-case | A malformed `ctx.today` would be stored and later wipe state | false | `localDate(Date.now())` always yields zero-padded `YYYY-MM-DD`; there is no path producing NaN. | reject |

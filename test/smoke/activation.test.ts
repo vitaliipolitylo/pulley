@@ -45,6 +45,11 @@ suite('Activation', () => {
 		assert.ok(commands.includes('pulley.reconnect'));
 	});
 
+	test('Story 2.2: pulley.queue.focus (the backlog notification button) exists', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes('pulley.queue.focus'));
+	});
+
 	test('pulley.checkIntervalMinutes defaults to 15', () => {
 		const inspected = vscode.workspace.getConfiguration('pulley').inspect<number>('checkIntervalMinutes');
 		assert.strictEqual(inspected?.defaultValue, 15);
@@ -89,6 +94,8 @@ suite('Activation', () => {
 				},
 				openExternal: async () => true,
 				isFocused: () => true,
+				focusQueue: () => undefined,
+				today: () => '2026-10-03',
 			}).focusDelivery;
 
 		const window = activateWindow();
@@ -120,6 +127,8 @@ suite('Activation', () => {
 				return true;
 			},
 			isFocused: () => true,
+				focusQueue: () => undefined,
+				today: () => '2026-10-03',
 		});
 		await focusDelivery.lookupApplied(undefined, 'A');
 		await tick();
@@ -139,6 +148,8 @@ suite('Activation', () => {
 				return true;
 			},
 			isFocused: () => true,
+				focusQueue: () => undefined,
+				today: () => '2026-10-03',
 		});
 		await focusDelivery.lookupApplied(undefined, 'A');
 		await tick();

@@ -67,9 +67,30 @@ export const copy = {
 		`Pulley spotted a review request for ${item.repo}#${item.number}: '${item.title}'.` +
 		(item.requester !== undefined ? ` Requested by ${item.requester}.` : ` Author: ${item.author}.`),
 
+	/** The backlog notification's one button: reveals the queue (`pulley.queue.focus`). */
+	openReviewQueue: 'Open Review Queue',
+	/**
+	 * Gentle lines for the backlog notification (Story 2.2), one per local day, picked by
+	 * `backlogLine`. Kind and short: no shame, score, or escalation.
+	 */
+	backlogLines: [
+		'The corgi is keeping them warm for you.',
+		"No rush. They'll be here when you're ready.",
+		'One at a time is plenty.',
+		'The corgi saved your place in line.',
+	],
+	/** The aggregate backlog notification: the count, then the day's gentle line. */
+	backlogNotification: (count: number, today: string): string => `${copy.pending(count)} ${backlogLine(today)}`,
+
 	log: {
 		/** `ref` is `owner/name#number` only: never the title or other PR content. */
 		notifiedNew: (ref: string): string => `Notified about a new review request: ${ref}.`,
+		/** The count only: never titles or other PR content. */
+		notifiedBacklog: (count: number): string =>
+			count === 1 ? 'Notified about 1 waiting review request.' : `Notified about ${count} waiting review requests.`,
+		/** The `notifyFailed` subject for a backlog reminder: the count only. */
+		backlogSubject: (count: number): string => `the backlog reminder (${count} waiting)`,
+		focusQueueFailed: (reason: string): string => `Revealing the review queue failed: ${reason}`,
 		/** `subject` is `owner/name#number`, or the count for a backlog reminder. No retry follows. */
 		notifyFailed: (subject: string): string => `Showing the notification failed for ${subject}; it will not be retried.`,
 		notifyItemMissing: (accountId: string, itemId: string): string =>
@@ -119,6 +140,19 @@ export const copy = {
 		intervalRestarted: (minutes: number): string => `Check interval is ${minutes} min; the timer restarted.`,
 	},
 } as const;
+
+/**
+ * The backlog line for a local day (`YYYY-MM-DD`): a deterministic hash (FNV-1a) of the `today`
+ * string picks one of `copy.backlogLines`, so every window shows the same line on the same day.
+ */
+export function backlogLine(today: string): string {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < today.length; i++) {
+		hash ^= today.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return copy.backlogLines[hash % copy.backlogLines.length];
+}
 
 /** The viewsWelcome markdown shown while unconnected (mirrored in package.json). */
 export const unconnectedWelcome = `${copy.unconnectedExplanation}\n[${copy.connectButton}](command:pulley.connect)`;

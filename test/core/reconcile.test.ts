@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyAccount, reconcile, type ReconcileCtx } from '../../src/core/reconcile.ts';
 import { viewModel } from '../../src/core/viewModel.ts';
-import type { Account, CheckResult, RequestItem, Stored, Tracked } from '../../src/core/types.ts';
+import { windowFocused } from '../../src/core/windowFocused.ts';
+import type { Account, CheckResult, Effect, RequestItem, Stored, Tracked } from '../../src/core/types.ts';
 
 const formatTime = (ms: number): string => `t${ms}`;
 
@@ -20,7 +21,8 @@ function deepFreeze<T>(value: T): T {
 
 const NOW = 50_000;
 const INTERVAL = 900_000;
-const ctx: ReconcileCtx = { now: NOW, activeAccountId: 'Y', intervalMs: INTERVAL, windowFocused: false };
+const TODAY = '2026-10-03';
+const ctx: ReconcileCtx = { now: NOW, activeAccountId: 'Y', intervalMs: INTERVAL, windowFocused: false, today: TODAY, startupReminderDue: false };
 
 const item = (id: string, extra: Partial<RequestItem> = {}): RequestItem => ({
 	id,
@@ -140,11 +142,19 @@ const cases: Case[] = [
 		}),
 	},
 	{
-		name: 'rule 5 / matrix "Before baseline": first success sets firstCheckDone; added items are backlog',
+		name: 'rule 5 / matrix "Before baseline": first success sets firstCheckDone; added items are backlog (and a first-connection alert is pending)',
 		stored: stored({}),
 		result: ok(5, true, [item('A')]),
 		expected: stored({
-			Y: account({ ...attempt(5), firstCheckDone: true, lastSuccessAt: 5, lastAppliedFetchStartedAt: 5, items: itemsOf(tracked('A', NOW)) }),
+			Y: account({
+				...attempt(5),
+				firstCheckDone: true,
+				lastSuccessAt: 5,
+				lastAppliedFetchStartedAt: 5,
+				backlogAlert: { state: 'pending', firstConnection: true },
+				lastBacklogReminderDate: TODAY,
+				items: itemsOf(tracked('A', NOW)),
+			}),
 		}),
 	},
 	{
@@ -325,6 +335,9 @@ const baseline = (extra: Partial<Account> = {}): Account =>
 /** A complete success applied at `at`. */
 const completeAt = (at: number) => ({ ...attempt(at), lastSuccessAt: at, lastAppliedFetchStartedAt: at });
 const notifyNew = (itemId: string, accountId = 'Y') => ({ kind: 'notifyNew' as const, accountId, itemId });
+const notifyBacklog = (count: number, firstConnection: boolean, accountId = 'Y'): Effect => ({ kind: 'notifyBacklog', accountId, count, firstConnection });
+/** A backlog reminder delivered today in a focused window (Story 2.2). */
+const shownToday = (firstConnection = false) => ({ backlogAlert: { state: 'shown' as const, firstConnection }, lastBacklogReminderDate: TODAY });
 
 interface AlertCase {
 	name: string;
@@ -333,7 +346,7 @@ interface AlertCase {
 	ctx: ReconcileCtx;
 	/** Expected stored output; `'same'` means the very same input object. */
 	expected: Stored | 'same';
-	effects: ReturnType<typeof notifyNew>[];
+	effects: Effect[];
 }
 
 const alertCases: AlertCase[] = [
@@ -354,12 +367,12 @@ const alertCases: AlertCase[] = [
 		effects: [],
 	},
 	{
-		name: 'matrix "Gap": a success at T+2I+1 adds X as backlog with no effect; newSignal false',
+		name: 'matrix "Gap": a success at T+2I+1 adds X as backlog with no notifyNew; newSignal false; one daily backlog reminder (Story 2.2)',
 		stored: stored({ Y: baseline({ newSignal: true }) }),
 		result: ok(T + 2 * I + 1, true, [item('X')]),
 		ctx: focused,
-		expected: stored({ Y: baseline({ ...completeAt(T + 2 * I + 1), newSignal: false, items: itemsOf(tracked('X', NOW)) }) }),
-		effects: [],
+		expected: stored({ Y: baseline({ ...completeAt(T + 2 * I + 1), newSignal: false, ...shownToday(), items: itemsOf(tracked('X', NOW)) }) }),
+		effects: [notifyBacklog(1, false)],
 	},
 	{
 		name: 'matrix "Gap boundary": a success at exactly T+2I adds X as new',
@@ -378,12 +391,12 @@ const alertCases: AlertCase[] = [
 		effects: [],
 	},
 	{
-		name: 'baseline predicate: an unknown previous interval makes added items backlog',
+		name: 'baseline predicate: an unknown previous interval makes added items backlog (and reminds once per day, X8)',
 		stored: stored({ Y: { ...baseline(), lastAttemptIntervalMs: undefined } }),
 		result: ok(T + I, true, [item('X')]),
 		ctx: focused,
-		expected: stored({ Y: baseline({ ...completeAt(T + I), items: itemsOf(tracked('X', NOW)) }) }),
-		effects: [],
+		expected: stored({ Y: baseline({ ...completeAt(T + I), ...shownToday(), items: itemsOf(tracked('X', NOW)) }) }),
+		effects: [notifyBacklog(1, false)],
 	},
 	{
 		name: 'matrix "Already shown": a later poll that still has X emits nothing more',
@@ -537,7 +550,7 @@ test('story 2.1 / matrix "Failure after a gap": a failure at T+3I, then a comple
 	const failed = reconcile(deepFreeze(stored({ Y: baseline() })), deepFreeze(fail(T + 3 * I)), focused);
 	assert.deepEqual(failed.effects, []);
 	const out = reconcile(deepFreeze(failed.stored), deepFreeze(ok(T + 3 * I + I / 2, true, [item('X')])), focused);
-	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.effects, [notifyBacklog(1, false)], 'no notifyNew; the gap gives the daily backlog reminder');
 	assert.deepEqual(out.stored.accounts.Y.items.X, tracked('X', NOW));
 	assert.equal(out.stored.accounts.Y.newSignal, false);
 });
@@ -545,7 +558,7 @@ test('story 2.1 / matrix "Failure after a gap": a failure at T+3I, then a comple
 test('story 2.1 / matrix "Incomplete inside gap": an incomplete success at T+I, then a complete success at T+2I+1 adds X as backlog', () => {
 	const partial = reconcile(deepFreeze(stored({ Y: baseline() })), deepFreeze(ok(T + I, false, [])), focused);
 	const out = reconcile(deepFreeze(partial.stored), deepFreeze(ok(T + 2 * I + 1, true, [item('X')])), focused);
-	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.effects, [notifyBacklog(1, false)], 'no notifyNew; the gap gives the daily backlog reminder');
 	assert.deepEqual(out.stored.accounts.Y.items.X, tracked('X', NOW));
 	assert.equal(out.stored.accounts.Y.newSignal, false);
 });
@@ -555,4 +568,297 @@ test('story 2.1 / rule-1 rejection delivers only the active account; the other a
 	const out = reconcile(input, deepFreeze(fail(T + I, 'Z')), focused);
 	assert.deepEqual(out.effects, [notifyNew('X')]);
 	assert.equal(out.stored.accounts.Z, input.accounts.Z);
+});
+
+// ---------------------------------------------------------------------------
+// Story 2.2: backlog reminders with a daily limit (AD-8). One case per matrix row.
+// D is yesterday, D1 is today; T/I as above. "Startup" = ctx.startupReminderDue.
+// ---------------------------------------------------------------------------
+
+const D = '2026-10-02';
+const D1 = TODAY;
+const startup: ReconcileCtx = { ...ctx, startupReminderDue: true };
+const pendingReminder = (firstConnection: boolean) => ({ state: 'pending' as const, firstConnection });
+/** A baseline with three backlog items and a reminder already shown on `date`. */
+const withBacklog = (date: string | undefined, extra: Partial<Account> = {}): Account => {
+	const acct = baseline({ items: itemsOf(tracked('A', 1), tracked('B', 2), tracked('C', 3)), backlogAlert: { state: 'shown', firstConnection: false }, ...extra });
+	return date === undefined ? acct : { ...acct, lastBacklogReminderDate: date };
+};
+const ABC = [item('A'), item('B'), item('C')];
+const run = (input: Stored, result: CheckResult, c: ReconcileCtx) => reconcile(deepFreeze(input), deepFreeze(result), c);
+const backlogEffects = (effects: Effect[]) => effects.filter((e) => e.kind === 'notifyBacklog');
+
+test('story 2.2 / matrix "First connection, items": first complete success, 3 items, focused: notifyBacklog {3, true}, no notifyNew, date = today', () => {
+	const out = run(stored({}), ok(T, true, ABC), focused);
+	assert.deepEqual(out.effects, [notifyBacklog(3, true)]);
+	const y = out.stored.accounts.Y;
+	assert.deepEqual(y.backlogAlert, { state: 'shown', firstConnection: true });
+	assert.equal(y.lastBacklogReminderDate, TODAY);
+	assert.ok(Object.values(y.items).every((t) => t.origin === 'backlog' && t.alert === 'none'));
+	assert.deepEqual(out.report, { reminderEvaluated: true });
+});
+
+test('story 2.2 / first connection ignores a recorded date (whatever the threshold or day)', () => {
+	const out = run(stored({ Y: account({ lastBacklogReminderDate: TODAY }) }), ok(T, true, ABC), ctx);
+	assert.deepEqual(out.stored.accounts.Y.backlogAlert, pendingReminder(true));
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, TODAY);
+});
+
+test('story 2.2 / matrix "First connection, empty": no alert; a later ordinary check adding X gives notifyNew X', () => {
+	const first = run(stored({}), ok(T, true, []), { ...focused, startupReminderDue: true });
+	assert.deepEqual(first.effects, []);
+	assert.equal(first.stored.accounts.Y.backlogAlert, 'none');
+	assert.equal(first.stored.accounts.Y.lastBacklogReminderDate, undefined);
+	assert.deepEqual(first.report, { reminderEvaluated: true });
+	const later = run(first.stored, ok(T + I, true, [item('X')]), focused);
+	assert.deepEqual(later.effects, [notifyNew('X')]);
+	assert.equal(later.stored.accounts.Y.backlogAlert, 'none');
+});
+
+test('story 2.2 / matrix "Incomplete before baseline" (A3): two incomplete successes, then a complete one alerts {n, true} once', () => {
+	const p1 = run(stored({}), ok(T, false, [item('A')]), { ...focused, startupReminderDue: true });
+	assert.deepEqual(p1.effects, []);
+	assert.equal(p1.stored.accounts.Y.backlogAlert, 'none');
+	assert.deepEqual(p1.report, { reminderEvaluated: false });
+	const p2 = run(p1.stored, ok(T + I, false, [item('A'), item('B')]), { ...focused, startupReminderDue: true });
+	assert.deepEqual(p2.effects, []);
+	assert.equal(p2.stored.accounts.Y.backlogAlert, 'none');
+	assert.equal(p2.stored.accounts.Y.lastBacklogReminderDate, undefined);
+	const complete = run(p2.stored, ok(T + 2 * I, true, [item('A'), item('B')]), { ...focused, startupReminderDue: true });
+	assert.deepEqual(complete.effects, [notifyBacklog(2, true)]);
+	assert.ok(Object.values(complete.stored.accounts.Y.items).every((t) => t.origin === 'backlog'));
+	const next = run(complete.stored, ok(T + 3 * I, true, [item('A'), item('B')]), { ...focused, startupReminderDue: true });
+	assert.deepEqual(next.effects, [], 'no second alert');
+});
+
+test('story 2.2 / matrix "Closed / gap": a complete gap success adds Y with date != today: Y backlog, notifyBacklog, no notifyNew', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + 2 * I + 1, true, [...ABC, item('Y')]), focused);
+	assert.deepEqual(out.effects, [notifyBacklog(4, false)]);
+	assert.deepEqual(out.stored.accounts.Y.items.Y, tracked('Y', NOW));
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, TODAY);
+});
+
+test('story 2.2 / matrix "Gap, same day": a gap adds Y with date = today: Y backlog, no notification', () => {
+	const out = run(stored({ Y: withBacklog(TODAY) }), ok(T + 2 * I + 1, true, [...ABC, item('Y')]), focused);
+	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.stored.accounts.Y.items.Y, tracked('Y', NOW));
+	assert.deepEqual(out.stored.accounts.Y.backlogAlert, { state: 'shown', firstConnection: false });
+});
+
+test('story 2.2 / matrix "Next-day startup": flag set, items, date = yesterday: one notifyBacklog {n, false}; reminderEvaluated', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + I, true, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(out.effects, [notifyBacklog(3, false)]);
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, TODAY);
+	assert.deepEqual(out.report, { reminderEvaluated: true });
+});
+
+test('story 2.2 / matrix "Same-day startup": flag set, date = today: nothing; reminderEvaluated (flag cleared)', () => {
+	const input = withBacklog(TODAY);
+	const out = run(stored({ Y: input }), ok(T + I, true, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(out.effects, []);
+	assert.equal(out.stored.accounts.Y.backlogAlert, input.backlogAlert);
+	assert.deepEqual(out.report, { reminderEvaluated: true });
+});
+
+test('story 2.2 / matrix "Failed startup check": only attempt fields and lastFailure change; flag stays; a later complete success reminds', () => {
+	const input = withBacklog(D);
+	const failed = run(stored({ Y: input }), fail(T + I), { ...startup, windowFocused: true });
+	assert.deepEqual(failed.effects, []);
+	assert.deepEqual(failed.stored.accounts.Y, { ...input, ...attempt(T + I), lastFailure: { at: T + I, reason: 'network' } });
+	assert.deepEqual(failed.report, { reminderEvaluated: false });
+	const later = run(failed.stored, ok(T + I + I / 2, true, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(later.effects, [notifyBacklog(3, false)]);
+	assert.deepEqual(later.report, { reminderEvaluated: true });
+});
+
+test('story 2.2 / matrix "Partial startup" (E4): an incomplete success with the flag set: no reminder; reminderEvaluated false', () => {
+	const input = withBacklog(D);
+	const out = run(stored({ Y: input }), ok(T + I, false, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(out.effects, []);
+	assert.equal(out.stored.accounts.Y.backlogAlert, input.backlogAlert);
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, D);
+	assert.deepEqual(out.report, { reminderEvaluated: false });
+});
+
+test('story 2.2 / matrix "Rule-1 / rule-4" (A6): a dropped or stale result with the flag set: no reminder; reminderEvaluated false', () => {
+	const input = stored({ Y: withBacklog(D) });
+	const dropped = run(input, ok(T + I, true, ABC, 'Z'), { ...startup, windowFocused: true });
+	assert.deepEqual(dropped.effects, []);
+	assert.deepEqual(dropped.stored, input);
+	assert.deepEqual(dropped.report, { reminderEvaluated: false });
+	const noActive = run(input, ok(T + I, true, ABC), { ...startup, activeAccountId: undefined });
+	assert.deepEqual(noActive.report, { reminderEvaluated: false });
+	const stale = run(input, ok(T, true, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(stale.effects, []);
+	assert.deepEqual(stale.stored.accounts.Y, { ...input.accounts.Y, ...attempt(T) }, 'only the attempt fields change');
+	assert.deepEqual(stale.report, { reminderEvaluated: false });
+});
+
+test('story 2.2 / matrix "Focused failure, pending" (A2, E2): queue unchanged; the pending reminder is delivered once', () => {
+	const input = withBacklog(D, { backlogAlert: pendingReminder(false) });
+	const out = run(stored({ Y: input }), fail(T + I), focused);
+	assert.deepEqual(out.effects, [notifyBacklog(3, false)]);
+	assert.deepEqual(out.stored.accounts.Y.items, input.items);
+	assert.deepEqual(out.stored.accounts.Y.backlogAlert, { state: 'shown', firstConnection: false });
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, TODAY, 'the delivery day');
+	assert.deepEqual(out.report, { reminderEvaluated: false });
+	const again = run(out.stored, fail(T + 2 * I), focused);
+	assert.deepEqual(again.effects, []);
+});
+
+test('story 2.2 / rule-4 no-op and rule-1 rejection, focused, still deliver an already-pending reminder', () => {
+	const input = stored({ Y: withBacklog(D, { backlogAlert: pendingReminder(false) }) });
+	const stale = run(input, ok(T, true, ABC), focused);
+	assert.deepEqual(stale.effects, [notifyBacklog(3, false)]);
+	const dropped = run(input, ok(T + I, true, ABC, 'Z'), focused);
+	assert.deepEqual(dropped.effects, [notifyBacklog(3, false)]);
+	assert.deepEqual(dropped.report, { reminderEvaluated: false });
+});
+
+test('story 2.2 / matrix "Continuous session": next day, no flag, no gap: no reminder', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + I, true, ABC), focused);
+	assert.deepEqual(out.effects, []);
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, D);
+	assert.deepEqual(out.report, { reminderEvaluated: true });
+});
+
+test('story 2.2 / matrix "Second window": window B starts after A reminded today: nothing', () => {
+	const out = run(stored({ Y: withBacklog(TODAY) }), ok(T + I, true, ABC), { ...startup, windowFocused: true });
+	assert.deepEqual(out.effects, []);
+});
+
+test('story 2.2 / matrix "Unfocused": a pending reminder stays pending; focus delivers once', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + I, true, ABC), startup);
+	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.stored.accounts.Y.backlogAlert, pendingReminder(false));
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, TODAY);
+	const shown = windowFocused(deepFreeze(out.stored), undefined, { activeAccountId: 'Y', today: TODAY });
+	assert.deepEqual(shown.effects, [notifyBacklog(3, false)]);
+	const again = windowFocused(deepFreeze(shown.stored), undefined, { activeAccountId: 'Y', today: TODAY });
+	assert.deepEqual(again.effects, []);
+});
+
+test('story 2.2 / matrix "Pending at midnight, then startup" (A4, E3): one notifyBacklog on D+1, date = D+1; the D+1 startup shows nothing', () => {
+	const decided = run(stored({ Y: withBacklog('2026-10-01') }), ok(T + I, true, ABC), { ...startup, today: D });
+	assert.deepEqual(decided.stored.accounts.Y.backlogAlert, pendingReminder(false));
+	assert.equal(decided.stored.accounts.Y.lastBacklogReminderDate, D);
+	const shown = windowFocused(deepFreeze(decided.stored), undefined, { activeAccountId: 'Y', today: D1 });
+	assert.deepEqual(shown.effects, [notifyBacklog(3, false)]);
+	assert.equal(shown.stored.accounts.Y.lastBacklogReminderDate, D1);
+	const restarted = run(shown.stored, ok(T + 2 * I, true, ABC), { ...startup, today: D1, windowFocused: true });
+	assert.deepEqual(restarted.effects, []);
+});
+
+test('story 2.2 / matrix "Pending first connection, next-day success" (A5): stays {pending, true}; focus delivers {n, true} once; date = D+1', () => {
+	const first = run(stored({}), ok(T, true, ABC), { ...ctx, today: D });
+	assert.deepEqual(first.stored.accounts.Y.backlogAlert, pendingReminder(true));
+	const nextDay = run(first.stored, ok(T + I, true, ABC), { ...startup, today: D1 });
+	assert.deepEqual(nextDay.effects, []);
+	assert.deepEqual(nextDay.stored.accounts.Y.backlogAlert, pendingReminder(true), 'never replaced by an ongoing reminder');
+	assert.equal(nextDay.stored.accounts.Y.lastBacklogReminderDate, D);
+	assert.deepEqual(nextDay.report, { reminderEvaluated: true });
+	const shown = windowFocused(deepFreeze(nextDay.stored), undefined, { activeAccountId: 'Y', today: D1 });
+	assert.deepEqual(shown.effects, [notifyBacklog(3, true)]);
+	assert.equal(shown.stored.accounts.Y.lastBacklogReminderDate, D1);
+	const again = windowFocused(deepFreeze(shown.stored), undefined, { activeAccountId: 'Y', today: D1 });
+	assert.deepEqual(again.effects, []);
+});
+
+test('story 2.2 / matrix "Emptied": items gone before delivery: none, no notification; date stays D, so D gets no further reminder', () => {
+	const decided = run(stored({ Y: withBacklog('2026-10-01') }), ok(T + I, true, ABC), { ...startup, today: D });
+	assert.deepEqual(decided.stored.accounts.Y.backlogAlert, pendingReminder(false));
+	const emptied = run(decided.stored, ok(T + 2 * I, true, []), { ...ctx, today: D });
+	assert.deepEqual(emptied.effects, []);
+	assert.equal(emptied.stored.accounts.Y.backlogAlert, 'none');
+	assert.equal(emptied.stored.accounts.Y.lastBacklogReminderDate, D);
+	const gapLater = run(emptied.stored, ok(T + 5 * I, true, [item('Q')]), { ...focused, today: D, startupReminderDue: true });
+	assert.deepEqual(gapLater.effects, [], 'D is used up');
+	assert.deepEqual(gapLater.stored.accounts.Y.items.Q, tracked('Q', NOW));
+	const nextDay = run(gapLater.stored, ok(T + 6 * I, true, [item('Q')]), { ...focused, today: D1, startupReminderDue: true });
+	assert.deepEqual(nextDay.effects, [notifyBacklog(1, false)]);
+});
+
+test('story 2.2 / Debug Seed (B4): with startupReminderDue false a complete success decides no startup reminder', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + I, true, ABC), { ...focused, startupReminderDue: false });
+	assert.deepEqual(out.effects, []);
+});
+
+test('story 2.2 (X8): only a gap or missing-prior-attempt backlog item reminds; a new item does not', () => {
+	const out = run(stored({ Y: withBacklog(D) }), ok(T + I, true, [...ABC, item('N')]), focused);
+	assert.deepEqual(out.effects, [notifyNew('N')]);
+	assert.equal(out.stored.accounts.Y.lastBacklogReminderDate, D);
+});
+
+test('story 2.2 (complete-only): a gap item added by an incomplete check never reminds, and is not re-counted by the next complete check', () => {
+	const partial = run(stored({ Y: withBacklog(D) }), ok(T + 3 * I, false, [...ABC, item('G')]), focused);
+	assert.deepEqual(partial.effects, []);
+	assert.deepEqual(partial.stored.accounts.Y.items.G, tracked('G', NOW));
+	assert.equal(partial.stored.accounts.Y.lastBacklogReminderDate, D);
+	const complete = run(partial.stored, ok(T + 3 * I + 1, true, [...ABC, item('G')]), focused);
+	assert.deepEqual(complete.effects, []);
+});
+
+test('story 2.2 / reminderEvaluated per result kind', () => {
+	const input = stored({ Y: withBacklog(TODAY) });
+	const kinds: Array<[string, Stored, CheckResult, ReconcileCtx, boolean]> = [
+		['complete applied success', input, ok(T + I, true, ABC), ctx, true],
+		['first connection', stored({}), ok(T, true, ABC), ctx, true],
+		['incomplete success', input, ok(T + I, false, ABC), ctx, false],
+		['failure', input, fail(T + I), ctx, false],
+		['rule-4 no-op', input, ok(T, true, ABC), ctx, false],
+		['rule-1 rejection', input, ok(T + I, true, ABC, 'Z'), ctx, false],
+		['no active account', input, ok(T + I, true, ABC), { ...ctx, activeAccountId: undefined }, false],
+	];
+	for (const [name, base, result, c, expected] of kinds) {
+		assert.deepEqual(run(base, result, c).report, { reminderEvaluated: expected }, name);
+	}
+});
+
+test('story 2.2 / AC: any sequence of checks, failures, focus changes, and startups in one window gives at most one notifyBacklog per local day', () => {
+	// A deterministic pseudo-random walk over 30 days with several events per day.
+	let seed = 12345;
+	const rand = () => {
+		seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+		return seed / 2 ** 32;
+	};
+	const days = Array.from({ length: 30 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')}`);
+	let s: Stored = stored({});
+	let flag = true;
+	let at = T;
+	let ids = ['A', 'B'];
+	const perDay = new Map<string, number>();
+	const count = (day: string, effects: Effect[]) => perDay.set(day, (perDay.get(day) ?? 0) + backlogEffects(effects).length);
+	for (const day of days) {
+		for (let step = 0; step < 12; step++) {
+			const r = rand();
+			const focusedNow = rand() < 0.5;
+			if (r < 0.1) {
+				flag = true; // this window restarts
+				continue;
+			}
+			if (r < 0.25) {
+				const out = windowFocused(s, undefined, { activeAccountId: 'Y', today: day });
+				count(day, out.effects);
+				s = out.stored;
+				continue;
+			}
+			at += rand() < 0.2 ? 3 * I : I;
+			if (rand() < 0.3) {
+				ids = rand() < 0.5 ? [...ids, `N${at}`] : ids.slice(1);
+			}
+			const roll = rand();
+			const items = ids.map((id) => item(id));
+			const result: CheckResult = roll < 0.15 ? fail(at) : roll < 0.3 ? ok(at, false, items) : roll < 0.35 ? ok(T - 1, true, []) : ok(at, true, items);
+			const out = reconcile(s, result, { ...ctx, today: day, windowFocused: focusedNow, startupReminderDue: flag });
+			count(day, out.effects);
+			if (out.report?.reminderEvaluated) {
+				flag = false;
+			}
+			s = out.stored;
+		}
+	}
+	assert.ok([...perDay.values()].some((n) => n === 1), 'the walk exercised at least one reminder');
+	for (const [day, n] of perDay) {
+		assert.ok(n <= 1, `${day} had ${n} aggregate notifications`);
+	}
 });

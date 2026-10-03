@@ -1,7 +1,7 @@
 // Notifier tests (Story 2.1): copy, button, dismissal, missing items, at-most-once submission.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copy } from '../../src/core/copy.ts';
+import { backlogLine, copy } from '../../src/core/copy.ts';
 import { emptyAccount } from '../../src/core/reconcile.ts';
 import type { Effect, Stored, Tracked } from '../../src/core/types.ts';
 import { createFocusDelivery, createNotifier } from '../../src/shell/notifier.ts';
@@ -26,11 +26,13 @@ const stored = (accounts: Record<string, Tracked[]>): Stored => ({
 	),
 });
 const notifyNew = (itemId: string, accountId = 'Y'): Effect => ({ kind: 'notifyNew', accountId, itemId });
+const TODAY = '2026-10-03';
 
 /** A notifier whose messages resolve only when the test settles them. */
 function harness(show?: (text: string, button: string) => PromiseLike<string | undefined>) {
 	const shown: Array<{ text: string; button: string; settle: (choice: string | undefined) => void; fail: (error: unknown) => void }> = [];
 	const opened: string[] = [];
+	const focused: string[] = [];
 	const lines: string[] = [];
 	const runner = createNotifier({
 		showMessage:
@@ -43,9 +45,13 @@ function harness(show?: (text: string, button: string) => PromiseLike<string | u
 			opened.push(url);
 			return Promise.resolve(true);
 		},
+		focusQueue: () => {
+			focused.push('queue');
+		},
+		today: () => TODAY,
 		log: (line) => lines.push(line),
 	});
-	return { runner, shown, opened, lines };
+	return { runner, shown, opened, focused, lines };
 }
 
 test('requester present: the message names the requester', () => {
@@ -160,15 +166,16 @@ test('notification log lines never carry the title', () => {
 // Focus delivery: the shell runs windowFocused after focus events and account-changing lookups.
 
 function focusHarness(focusedNow: boolean) {
-	const calls: Array<{ activeAccountId: string | undefined }> = [];
+	const calls: Array<{ activeAccountId: string | undefined; today: string }> = [];
 	const lines: string[] = [];
 	const delivery = createFocusDelivery({
 		store: {
 			mutate: async (_transition: unknown, _input: unknown, ctx: unknown) => {
-				calls.push(ctx as { activeAccountId: string | undefined });
+				calls.push(ctx as { activeAccountId: string | undefined; today: string });
 			},
 		} as never,
 		isFocused: () => focusedNow,
+		today: () => TODAY,
 		log: (line) => lines.push(line),
 	});
 	return { delivery, calls, lines };
@@ -177,7 +184,7 @@ function focusHarness(focusedNow: boolean) {
 test('focus delivery: a lookup that changes the active account in a focused window runs windowFocused for it', async () => {
 	const h = focusHarness(true);
 	await h.delivery.lookupApplied(undefined, 'Y');
-	assert.deepEqual(h.calls, [{ activeAccountId: 'Y' }]);
+	assert.deepEqual(h.calls, [{ activeAccountId: 'Y', today: TODAY }]);
 });
 
 test('focus delivery: an unchanged account, a signed-out lookup, or an unfocused window does nothing', async () => {
@@ -195,8 +202,99 @@ test('focus delivery: a failing mutate is logged and never rejects', async () =>
 	const delivery = createFocusDelivery({
 		store: { mutate: () => Promise.reject(new Error('disk full')) },
 		isFocused: () => true,
+		today: () => TODAY,
 		log: (line) => lines.push(line),
 	});
 	await delivery.focused('Y');
 	assert.deepEqual(lines, [copy.log.focusDeliveryFailed('disk full')]);
+});
+
+// Story 2.2: the aggregate backlog notification.
+
+const notifyBacklog = (count: number, firstConnection = false, accountId = 'Y'): Effect => ({ kind: 'notifyBacklog', accountId, count, firstConnection });
+
+test('backlog: the message is the count plus the day line; the one button is Open Review Queue', () => {
+	const h = harness();
+	h.runner([notifyBacklog(3, true)], stored({ Y: [X] }));
+	assert.equal(h.shown.length, 1);
+	assert.equal(h.shown[0].text, copy.backlogNotification(3, TODAY));
+	assert.equal(h.shown[0].text, `3 reviews are waiting. ${backlogLine(TODAY)}`);
+	assert.equal(h.shown[0].button, 'Open Review Queue');
+	assert.deepEqual(h.lines, [copy.log.notifiedBacklog(3)]);
+});
+
+test('backlog: the button runs focusQueue (pulley.queue.focus) and opens no URL', async () => {
+	const h = harness();
+	h.runner([notifyBacklog(2)], stored({ Y: [X] }));
+	h.shown[0].settle(copy.openReviewQueue);
+	await tick();
+	assert.deepEqual(h.focused, ['queue']);
+	assert.deepEqual(h.opened, []);
+});
+
+test('backlog: dismissal is a no-op', async () => {
+	const h = harness();
+	h.runner([notifyBacklog(2)], stored({ Y: [X] }));
+	const before = [...h.lines];
+	h.shown[0].settle(undefined);
+	await tick();
+	assert.deepEqual(h.focused, []);
+	assert.deepEqual(h.lines, before);
+});
+
+test('backlog: showMessage is not awaited inside the runner', () => {
+	const h = harness();
+	assert.equal(h.runner([notifyBacklog(2)], stored({ Y: [X] })), undefined);
+	assert.equal(h.shown.length, 1);
+});
+
+test('backlog (A7): a synchronous throw logs notifyFailed with the count only and does not escape', () => {
+	const h = harness(() => {
+		throw new Error('host gone');
+	});
+	assert.doesNotThrow(() => h.runner([notifyBacklog(4)], stored({ Y: [X] })));
+	assert.deepEqual(h.lines, [copy.log.notifyFailed(copy.log.backlogSubject(4))]);
+});
+
+test('backlog (A7): an async rejection logs notifiedBacklog then notifyFailed with the count only', async () => {
+	const h = harness();
+	const unhandled: unknown[] = [];
+	const onUnhandled = (reason: unknown) => unhandled.push(reason);
+	process.on('unhandledRejection', onUnhandled);
+	try {
+		h.runner([notifyBacklog(4)], stored({ Y: [{ ...X, title: 'Secret title text' }] }));
+		h.shown[0].fail(new Error('Secret title text in an error'));
+		await tick();
+		await tick();
+	} finally {
+		process.off('unhandledRejection', onUnhandled);
+	}
+	assert.deepEqual(unhandled, []);
+	assert.deepEqual(h.lines, [copy.log.notifiedBacklog(4), copy.log.notifyFailed(copy.log.backlogSubject(4))]);
+	assert.ok(h.lines.every((line) => !line.includes('Secret title') && !line.includes('octo/app')));
+});
+
+test('backlog: a failing focusQueue is logged and never escapes', async () => {
+	const lines: string[] = [];
+	let settle!: (choice: string | undefined) => void;
+	const runner = createNotifier({
+		showMessage: () => new Promise<string | undefined>((resolve) => (settle = resolve)),
+		openUrl: () => undefined,
+		focusQueue: () => Promise.reject(new Error('no view')),
+		today: () => TODAY,
+		log: (line) => lines.push(line),
+	});
+	runner([notifyBacklog(1)], stored({ Y: [X] }));
+	settle(copy.openReviewQueue);
+	await tick();
+	await tick();
+	assert.deepEqual(lines, [copy.log.notifiedBacklog(1), copy.log.focusQueueFailed('no view')]);
+});
+
+test('backlog and new effects in one run: one notification each, in effect order', () => {
+	const h = harness();
+	h.runner([notifyBacklog(2), notifyNew('X')], stored({ Y: [X] }));
+	assert.equal(h.shown.length, 2);
+	assert.equal(h.shown[0].button, copy.openReviewQueue);
+	assert.equal(h.shown[1].button, copy.openPullRequestCommandTitle);
 });

@@ -13,7 +13,7 @@ export interface StateMemento {
 	update(key: string, value: unknown): PromiseLike<void>;
 }
 
-export type Transition<I, C> = (stored: Stored, input: I, ctx: C) => TransitionResult;
+export type Transition<I, C, R = unknown> = (stored: Stored, input: I, ctx: C) => TransitionResult<R>;
 
 export type StoreRead = { readOnly: true } | { readOnly: false; stored: Stored };
 
@@ -22,8 +22,10 @@ export interface Store {
 	 * Serialized per window: re-read → migrate → transition → await write → run effects → notify.
 	 * Read-only mode skips the write and effects. Rejects only this call when the transition
 	 * throws or the write fails; later calls still run. A failing effect runner is logged, not rejected.
+	 * Resolves to the transition's `report` after the write and effects (also when an unchanged
+	 * result skipped the write); `undefined` in read-only mode, where no transition runs.
 	 */
-	mutate<I, C>(transition: Transition<I, C>, input: I, ctx: C): Promise<void>;
+	mutate<I, C, R>(transition: Transition<I, C, R>, input: I, ctx: C): Promise<R | undefined>;
 	/** A fresh, migrated read of the stored state (how other windows' writes appear). */
 	read(): StoreRead;
 	/**
@@ -75,12 +77,12 @@ export function createStore(
 	};
 
 	return {
-		mutate<I, C>(transition: Transition<I, C>, input: I, ctx: C): Promise<void> {
-			const run = async (): Promise<void> => {
+		mutate<I, C, R>(transition: Transition<I, C, R>, input: I, ctx: C): Promise<R | undefined> {
+			const run = async (): Promise<R | undefined> => {
 				const read = readMigrated();
 				if (read.readOnly) {
 					notify();
-					return;
+					return undefined;
 				}
 				const result = transition(read.stored, input, ctx);
 				// An unchanged result needs no write, unless the read was malformed (overwrite it with v1).
@@ -96,6 +98,7 @@ export function createStore(
 					}
 				}
 				notify();
+				return result.report;
 			};
 			const call = tail.then(run);
 			tail = call.catch(() => undefined);
