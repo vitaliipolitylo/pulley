@@ -9,6 +9,8 @@ import { viewModel } from '../../src/core/viewModel.ts';
 import {
 	connectPlan,
 	createIntervalReader,
+	createThresholdReader,
+	THRESHOLD_DEFAULT,
 	createQueueCheck,
 	createScheduler,
 	formatCheckTime,
@@ -474,7 +476,7 @@ test('chain: a 401 applied via nextConnection + reconcile + viewModel keeps the 
 	const failure: CheckResult = { ok: false, accountId: 'A', fetchStartedAt: 9, reason: 'unauthenticated' };
 	const connection = nextConnection(connectedA, failure, 3);
 	const stored = reconcile(succeeded, failure, { ...rctx, activeAccountId: activeAccountId(connection) }).stored;
-	const m = viewModel(stored, { connection, readOnly: false, checking: false }, { now: 10, formatTime: (ms) => `t${ms}` });
+	const m = viewModel(stored, { connection, readOnly: false, checking: false }, { now: 10, formatTime: (ms) => `t${ms}`, today: '2026-10-03', threshold: 5 });
 	assert.equal(m.action, 'reconnect');
 	assert.equal(m.reason, 'unauthenticated');
 	assert.deepEqual(
@@ -520,4 +522,41 @@ test('nextStartupReminderDue: cleared only by a report with reminderEvaluated tr
 	assert.equal(nextStartupReminderDue(false, { reminderEvaluated: false }), false);
 	assert.equal(nextStartupReminderDue(false, { reminderEvaluated: true }), false);
 	assert.equal(nextStartupReminderDue(false, undefined), false);
+});
+
+test('Story 2.3 threshold reader: unset → 5 silently; valid integers are used as-is', () => {
+	const logs: string[] = [];
+	let raw: unknown = undefined;
+	const read = createThresholdReader(() => raw, (line) => logs.push(line));
+	assert.equal(THRESHOLD_DEFAULT, 5);
+	assert.equal(read(), 5);
+	for (const value of [1, 5, 10, 100]) {
+		raw = value;
+		assert.equal(read(), value);
+	}
+	assert.deepEqual(logs, []);
+});
+
+test('Story 2.3 matrix "Bad threshold": 0 or 2.5 (or another non-integer) uses 5 and logs once per value', () => {
+	const logs: string[] = [];
+	let raw: unknown = 0;
+	const read = createThresholdReader(() => raw, (line) => logs.push(line));
+	assert.equal(read(), 5);
+	assert.equal(read(), 5);
+	raw = 2.5;
+	assert.equal(read(), 5);
+	assert.equal(read(), 5);
+	raw = -3;
+	assert.equal(read(), 5);
+	raw = Number.NaN;
+	assert.equal(read(), 5);
+	raw = '7';
+	assert.equal(read(), 5);
+	assert.deepEqual(logs, [
+		'pulley.backlogThreshold 0 is not a whole number of at least 1; using 5.',
+		'pulley.backlogThreshold 2.5 is not a whole number of at least 1; using 5.',
+		'pulley.backlogThreshold -3 is not a whole number of at least 1; using 5.',
+		'pulley.backlogThreshold NaN is not a whole number of at least 1; using 5.',
+		'pulley.backlogThreshold "7" is not a whole number of at least 1; using 5.',
+	]);
 });

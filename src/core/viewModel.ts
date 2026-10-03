@@ -1,8 +1,8 @@
 // The first view model (AD-12): everything the queue view shows, derived from stored
 // state plus window memory. Pure: no clock reads, never mutates its inputs.
 import { activeAccountId, type ConnectionState } from './connection.ts';
-import { copy, failureCopy, failureMessage, writeFailedMessage } from './copy.ts';
-import type { Account, Row, Stored, Tracked, ViewModel } from './types.ts';
+import { copy, failureCopy, failureMessage, mascotText, writeFailedMessage } from './copy.ts';
+import type { Account, Mascot, Row, Stored, Tracked, ViewModel } from './types.ts';
 
 /** Window memory the view model needs (never persisted). */
 export interface WindowView {
@@ -23,6 +23,10 @@ export interface ViewModelCtx {
 	 * (`Intl.DateTimeFormat`, short time plus a short date when not today), so core stays clock-free.
 	 */
 	formatTime: (ms: number) => string;
+	/** Local `YYYY-MM-DD`, computed in the shell: picks the backlog line (Story 2.2). */
+	today: string;
+	/** `pulley.backlogThreshold` as read by the shell (an integer ≥ 1). Presentation only. */
+	threshold: number;
 }
 
 const MINUTE = 60_000;
@@ -81,18 +85,51 @@ function rowsOf(account: Account | undefined, now: number): Row[] {
 	return account ? Object.values(account.items).sort(byAge).map((item) => toRow(item, now)) : [];
 }
 
+/** Corgi poses and their word equivalents (Story 2.3). */
+type Presentation = Pick<ViewModel, 'countStale' | 'mascot' | 'mascotText'>;
+
+function present(mascot: Mascot, ctx: ViewModelCtx, countStale = false): Presentation {
+	return { countStale, mascot, mascotText: mascotText(mascot, ctx.today) };
+}
+
+/**
+ * The count after a failure, a failed save, or an expired sign-in: the last-known row count
+ * (marked stale) once a complete check has succeeded, otherwise null.
+ */
+function lastKnown(lastSuccessAt: number | undefined, n: number): { count: number | null; countStale: boolean } {
+	return lastSuccessAt === undefined ? { count: null, countStale: false } : { count: n, countStale: true };
+}
+
+/**
+ * The corgi for pending work: backlog (count ≥ threshold), then new (`newSignal`), then older (a
+ * known `requestedAt` at least 24 h before `now`; never `firstSeenAt` or PR age), then waiting.
+ */
+function pendingMascot(account: Account, n: number, ctx: ViewModelCtx): Mascot {
+	if (n >= ctx.threshold) {
+		return 'backlog';
+	}
+	if (account.newSignal) {
+		return 'new';
+	}
+	const older = Object.values(account.items).some(
+		(item) => item.requestedAt !== undefined && Number.isFinite(item.requestedAt) && ctx.now - item.requestedAt >= DAY,
+	);
+	return older ? 'older' : 'waiting';
+}
+
 export function viewModel(stored: Stored | undefined, window: WindowView, ctx: ViewModelCtx): ViewModel {
+	const unknown = present('unknown', ctx);
 	if (window.readOnly || !stored) {
-		return { status: 'readOnly', count: null, message: copy.updatePulley, rows: [] };
+		return { status: 'readOnly', count: null, ...unknown, message: copy.updatePulley, rows: [] };
 	}
 	const connection = window.connection;
 	if (connection.kind === 'unknown') {
 		// The startup lookup is in flight; no account partition is known yet.
-		return { status: 'loading', count: null, message: copy.checkingConnection, rows: [] };
+		return { status: 'loading', count: null, ...unknown, message: copy.checkingConnection, rows: [] };
 	}
 	if (connection.kind === 'unconnected' && connection.reason === 'signed_out') {
 		// No session: no rows. The native viewsWelcome content (with Connect) carries the explanation.
-		return { status: 'unconnected', reason: 'signed_out', action: failureCopy.signed_out.action, count: null, rows: [] };
+		return { status: 'unconnected', reason: 'signed_out', action: failureCopy.signed_out.action, count: null, ...unknown, rows: [] };
 	}
 
 	const accountId = activeAccountId(connection);
@@ -105,19 +142,36 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 		// Reconnect in the message (the welcome content is hidden behind rows). With no rows the
 		// message stays unset so the Reconnect welcome content shows.
 		const rows = rowsOf(account, ctx.now);
+		const counted = rows.length > 0 ? lastKnown(lastSuccessAt, rows.length) : { count: null, countStale: false };
 		const message = rows.length > 0 ? failureMessage('unauthenticated', lastSuccessTime) : undefined;
-		const model: ViewModel = { status: 'unconnected', reason: 'unauthenticated', action: failureCopy.unauthenticated.action, count: null, rows };
+		const model: ViewModel = {
+			status: 'unconnected',
+			reason: 'unauthenticated',
+			action: failureCopy.unauthenticated.action,
+			...present('unknown', ctx, counted.countStale),
+			count: counted.count,
+			rows,
+		};
 		return message === undefined ? model : { ...model, message };
 	}
 
 	if (window.writeFailed) {
 		// The latest check could not be saved: what is stored may be out of date. Show it as stale
-		// (or unavailable with no prior success), never a count or clear, and offer Refresh.
-		return { status: 'stale', action: 'refresh', count: null, message: writeFailedMessage(lastSuccessTime), rows: rowsOf(account, ctx.now) };
+		// (or unavailable with no prior success), never a firm count or clear, and offer Refresh.
+		const rows = rowsOf(account, ctx.now);
+		const counted = lastKnown(lastSuccessAt, rows.length);
+		return {
+			status: 'stale',
+			action: 'refresh',
+			...present('unknown', ctx, counted.countStale),
+			count: counted.count,
+			message: writeFailedMessage(lastSuccessTime),
+			rows,
+		};
 	}
 
 	if (!account) {
-		return { status: 'loading', count: null, message: copy.checking, rows: [] };
+		return { status: 'loading', count: null, ...unknown, message: copy.checking, rows: [] };
 	}
 
 	const rows = rowsOf(account, ctx.now);
@@ -127,11 +181,14 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 
 	const failure = account.lastFailure;
 	if (failure && failure.at > (lastSuccessAt ?? 0)) {
-		// Stale after a prior success (with its time), or unavailable when none: never a count or clear.
+		// Stale after a prior success (with its time and the last-known count), or unavailable when
+		// none: never a firm count or clear.
+		const counted = lastKnown(lastSuccessAt, n);
 		return {
 			status: 'stale',
 			action: failureCopy[failure.reason].action,
-			count: null,
+			...present('unknown', ctx, counted.countStale),
+			count: counted.count,
 			message: failureMessage(failure.reason, lastSuccessTime),
 			rows,
 		};
@@ -143,17 +200,24 @@ export function viewModel(stored: Stored | undefined, window: WindowView, ctx: V
 			lastSuccessAt === undefined ||
 			(account.lastIncompleteFetchStartedAt !== undefined && account.lastIncompleteFetchStartedAt > lastSuccessAt);
 		const message = incomplete ? `${copy.pending(n)} ${copy.incomplete}` : copy.pending(n);
-		return { status: 'pending', count: lastSuccessAt === undefined ? null : n, message, ...checked, rows };
+		return {
+			status: 'pending',
+			count: lastSuccessAt === undefined ? null : n,
+			...present(pendingMascot(account, n, ctx), ctx),
+			message,
+			...checked,
+			rows,
+		};
 	}
 	const newerIncomplete =
 		lastSuccessAt !== undefined &&
 		account.lastIncompleteFetchStartedAt !== undefined &&
 		account.lastIncompleteFetchStartedAt > lastSuccessAt;
 	if (lastSuccessAt !== undefined && !newerIncomplete) {
-		return { status: 'clear', count: 0, message: copy.clear, ...checked, rows };
+		return { status: 'clear', count: 0, ...present('clear', ctx), message: copy.clear, ...checked, rows };
 	}
 	// Only incomplete successes that returned nothing (or none yet), or a newer incomplete check
 	// than the last complete one: never show a zero or clear.
 	const message = account.firstCheckDone && !window.checking ? copy.incomplete : copy.checking;
-	return { status: 'loading', count: null, message, rows };
+	return { status: 'loading', count: null, ...unknown, message, rows };
 }

@@ -47,7 +47,7 @@ suite('pulley.openPullRequest', () => {
 		rows = viewModel(
 			read.stored,
 			{ connection: { kind: 'connected', accountId: ACCOUNT, label: 'smoke', generation: 1 }, readOnly: false, checking: false },
-			{ now, formatTime: String },
+			{ now, formatTime: String, today: '2026-10-03', threshold: 5 },
 		).rows;
 		assert.strictEqual(rows.length, FIFTY, 'fifty seeded rows');
 	});

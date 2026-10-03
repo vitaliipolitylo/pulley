@@ -1,7 +1,7 @@
 // Backlog notification copy (Story 2.2): deterministic rotation and gentle wording.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backlogLine, copy } from '../../src/core/copy.ts';
+import { backlogLine, copy, mascotText } from '../../src/core/copy.ts';
 
 /** Every local day of 2026 as `YYYY-MM-DD`, built without Date so no time zone is involved. */
 function daysOf2026(): string[] {
@@ -53,4 +53,21 @@ test('no backlog line or notification shames, scores, or escalates', () => {
 
 test('the backlog button is "Open Review Queue"', () => {
 	assert.equal(copy.openReviewQueue, 'Open Review Queue');
+});
+
+test('Story 2.3: mascotText gives a word equivalent for every corgi state', () => {
+	assert.equal(mascotText('new', '2026-10-03'), 'The corgi spotted a new request.');
+	assert.equal(mascotText('older', '2026-10-03'), 'A request has waited more than a day.');
+	assert.equal(mascotText('backlog', '2026-10-03'), backlogLine('2026-10-03'));
+	assert.equal(mascotText('waiting', '2026-10-03'), 'The corgi is waiting with you.');
+	assert.equal(mascotText('clear', '2026-10-03'), 'The corgi is resting.');
+	assert.equal(mascotText('unknown', '2026-10-03'), "The corgi can't confirm the queue right now.");
+	for (const text of [...Object.values(copy.mascot), copy.countLastKnown, copy.backlogThresholdDescription]) {
+		assert.doesNotMatch(text, /behind|overdue|late|score|!/i, text);
+	}
+});
+
+test('Story 2.3: the count tooltip reads the count in words, qualified when stale', () => {
+	assert.equal(copy.countTooltip(1, false), '1 review is waiting.');
+	assert.equal(copy.countTooltip(3, true), "3 reviews are waiting. Last known count; Pulley couldn't confirm it.");
 });

@@ -6,10 +6,12 @@ import type { CheckResult } from './core/types.ts';
 import { viewModel } from './core/viewModel.ts';
 import { connect, getToken, lookupSilently, onGitHubSessionsChanged, SessionGeneration } from './shell/auth.ts';
 import { runCheck } from './shell/github.ts';
-import { OPEN_PULL_REQUEST_COMMAND, openPullRequest, QUEUE_VIEW_ID, QueueView } from './shell/queueView.ts';
+import { createQueueViewedWiring, OPEN_PULL_REQUEST_COMMAND, openPullRequest, QUEUE_VIEW_ID, QueueView } from './shell/queueView.ts';
+import { createStatusCount } from './shell/statusCount.ts';
 import {
 	connectPlan,
 	createIntervalReader,
+	createThresholdReader,
 	createQueueCheck,
 	createScheduler,
 	formatCheckTime,
@@ -23,6 +25,7 @@ import type { Store } from './shell/store.ts';
 import { FIFTY, fiftyResult } from '../test/smoke/fixtures/fifty.ts';
 
 const INTERVAL_SETTING = 'pulley.checkIntervalMinutes';
+const THRESHOLD_SETTING = 'pulley.backlogThreshold';
 
 /** Returned from `activate` only in Test mode, so smoke tests can seed and read stored state. */
 export interface PulleyTestApi {
@@ -34,7 +37,8 @@ let activeScheduler: Scheduler | undefined;
 export function activate(context: vscode.ExtensionContext): PulleyTestApi | undefined {
 	const output = vscode.window.createOutputChannel(copy.outputChannelName);
 	const log = (line: string): void => output.appendLine(`[${new Date().toISOString()}] ${line}`);
-	const view = new QueueView();
+	const view = new QueueView(context.extensionUri);
+	const statusCount = createStatusCount(view.treeView);
 	// Notifications run only after the store's write resolves, composed from the written state.
 	// The button opens the PR through the same https://github.com/ guard as a row.
 	const { store, focusDelivery } = createAlertingStore({
@@ -79,17 +83,38 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	};
 
 	const getIntervalMs = createIntervalReader(() => vscode.workspace.getConfiguration().get<unknown>(INTERVAL_SETTING), log);
+	const getThreshold = createThresholdReader(() => vscode.workspace.getConfiguration().get<unknown>(THRESHOLD_SETTING), log);
 
-	/** Renders from a fresh store read, which is how other windows' writes appear. */
-	const render = (): Promise<void> => {
+	/**
+	 * Story 2.3: viewing the queue ends the new signal. Runs from visibility, lookups, focus, and
+	 * after renders; never in read-only mode (X5), and with no effect. The wiring subscribes to
+	 * visibility and window focus (B5) itself.
+	 */
+	const viewedSync = createQueueViewedWiring({
+		store,
+		treeView: view.treeView,
+		onDidChangeWindowState: vscode.window.onDidChangeWindowState,
+		isFocused: () => vscode.window.state.focused,
+		getActiveAccountId: () => activeAccountId(connection),
+		log,
+	});
+	context.subscriptions.push(viewedSync);
+
+	/**
+	 * Renders the tree and the quiet count from a fresh store read, which is how other windows'
+	 * writes appear. Each part skips an unchanged model, so a quiet poll announces nothing.
+	 */
+	const render = async (): Promise<void> => {
 		const read = store.read();
 		const now = Date.now();
 		const model = viewModel(
 			read.readOnly ? undefined : read.stored,
 			{ connection, readOnly: read.readOnly, checking: checking > 0, writeFailed },
-			{ now, formatTime: (ms) => formatCheckTime(ms, now) },
+			{ now, formatTime: (ms) => formatCheckTime(ms, now), today: localDate(now), threshold: getThreshold() },
 		);
-		return view.render(model);
+		statusCount.render(model);
+		await view.render(model);
+		viewedSync.afterRender();
 	};
 	const sub = store.onDidChange(() => void render());
 	context.subscriptions.push({ dispose: () => sub.dispose() });
@@ -185,6 +210,8 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			// at activation) delivers that account's pending alerts in a focused window. Queued in the
 			// store, so it never waits for a poll or a focus change.
 			void focusDelivery.lookupApplied(previousAccountId, activeAccountId(state));
+			// A1 (Story 2.3): with the view visible, the new account's queue counts as viewed.
+			void viewedSync.lookupApplied(previousAccountId, activeAccountId(state));
 			await render();
 			return state;
 		})();
@@ -243,6 +270,10 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 				// A fresh interval from the change; no check and no stored change.
 				scheduler.restartInterval();
 				log(copy.log.intervalRestarted(getIntervalMs() / 60_000));
+			}
+			if (event.affectsConfiguration(THRESHOLD_SETTING)) {
+				// Presentation only: re-render; never check, write, or alert.
+				void render();
 			}
 		}),
 		// Bound as each row's TreeItem.command (click and Enter). `vscode.env.openExternal` is read

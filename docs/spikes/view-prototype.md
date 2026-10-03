@@ -36,6 +36,26 @@ from the activity bar. Note any discoverability concern that causes.
 | `Pulley: Open Pull Request` does not appear in the Command Palette | |
 | View never opened: after a check completes, rows appear the moment the view is opened | |
 
+### Corgi and count (Story 2.3)
+
+Run each row in the sidebar **and** the bottom Panel, in light, dark, and high-contrast themes at
+150% zoom. The corgi art lives in `media/corgi/{state}.svg`; the count is the native view badge.
+
+| Check | Result (pass / fail + notes) |
+|-------|------------------------------|
+| Debug Seed (50 rows): the first row is the corgi status row with the backlog pose and the day's backlog line | |
+| Set `pulley.backlogThreshold` to 100: the corgi changes (new / older / waiting); the output channel shows no check; no notification | |
+| Each pose (new, older, backlog, waiting, clear, unknown) stays recognizable at actual tree-icon size: broad ears, low wide face, short muzzle, central blaze | |
+| Every pose has words next to it (the status row label) and a count (badge and message); pose or color never stands alone | |
+| No animation in any pose | |
+| Badge: shows the count on the activity-bar icon / Panel tab; clicking the icon opens the queue | |
+| Badge tooltip reads "{n} reviews are waiting."; after a failure it adds "Last known count; Pulley couldn't confirm it." | |
+| Clear (0 rows) or never succeeded: no badge, never an unqualified 0 | |
+| Screen reader reads the status row text; the status row has no action (Enter does nothing) | |
+| Keyboard: arrow from the status row to the first request row; focus and selection survive a re-render | |
+| A background poll with nothing changed re-announces nothing | |
+| With a new request: opening the view (or focusing the window with the view visible) changes the corgi from new to its next state | |
+
 ## Discoverability
 
 Pulley does not reveal or focus the view after checks. Record whether finding the queue

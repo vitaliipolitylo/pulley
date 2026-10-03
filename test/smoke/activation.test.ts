@@ -55,6 +55,11 @@ suite('Activation', () => {
 		assert.strictEqual(inspected?.defaultValue, 15);
 	});
 
+	test('Story 2.3: pulley.backlogThreshold defaults to 5', () => {
+		const inspected = vscode.workspace.getConfiguration('pulley').inspect<number>('backlogThreshold');
+		assert.strictEqual(inspected?.defaultValue, 5);
+	});
+
 	/** A memento seeded with one pending item X for account A, shared across simulated windows. */
 	function seededMemento(url: string) {
 		const pending: Tracked = {

@@ -136,14 +136,26 @@ export interface Row {
 /** The one action offered for a failure reason (AD-11, AD-13). */
 export type FailureAction = 'connect' | 'reconnect' | 'refresh';
 
+/** The corgi state (Story 2.3). Every pose has a word equivalent in `mascotText`. */
+export type Mascot = 'new' | 'older' | 'backlog' | 'waiting' | 'clear' | 'unknown';
+
 export interface ViewModel {
 	status: ViewStatus;
 	/** Why the window is unconnected; set only when `status` is `unconnected`. */
 	reason?: UnconnectedReason;
 	/** The action the state offers; set for `unconnected` and `stale`. */
 	action?: FailureAction;
-	/** Null whenever `status` is not `pending` or `clear`, and before the first complete success. */
+	/**
+	 * The quiet count. `pending` and `clear` show the current count (null for `pending` before the
+	 * first complete success). After a prior complete success, stale, write-failed, and
+	 * unauthenticated-with-rows keep the last-known row count with `countStale` true. Null otherwise.
+	 */
 	count: number | null;
+	/** `count` is the last known value, which Pulley couldn't confirm (Story 2.3). */
+	countStale: boolean;
+	mascot: Mascot;
+	/** The word equivalent of `mascot`: state never relies on pose or color alone. */
+	mascotText: string;
 	/** TreeView.message. Undefined while the welcome content explains (unconnected with no rows). */
 	message?: string;
 	/**

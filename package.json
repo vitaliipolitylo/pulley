@@ -82,6 +82,13 @@
           "maximum": 240,
           "scope": "application",
           "markdownDescription": "How often Pulley checks GitHub for review requests, in minutes (5–240)."
+        },
+        "pulley.backlogThreshold": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "scope": "application",
+          "markdownDescription": "How many waiting reviews the corgi treats as a backlog (minimum 1). Changes only what Pulley shows; it never checks GitHub or notifies."
         }
       }
     },

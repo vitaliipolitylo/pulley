@@ -281,7 +281,7 @@ test('AC: only the active account partition changes; X is untouched (same refere
 	assert.equal(out.accounts.X, input.accounts.X);
 	assert.deepEqual(out.accounts.Y.items, {});
 	assert.deepEqual(
-		viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime }).rows,
+		viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime, today: '2026-10-03', threshold: 5 }).rows,
 		[],
 	);
 });
@@ -296,7 +296,7 @@ test('matrix "Reappearance": B removed, later returned is a new Tracked with a n
 
 test('matrix "Failure": status is stale after a failure that follows a success', () => {
 	const out = reconcile(deepFreeze(stored({ Y: AB })), deepFreeze(fail(20)), ctx).stored;
-	const model = viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime });
+	const model = viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime, today: '2026-10-03', threshold: 5 });
 	assert.equal(model.status, 'stale');
 	assert.equal(model.rows.length, 2);
 });
@@ -304,7 +304,7 @@ test('matrix "Failure": status is stale after a failure that follows a success',
 test('matrix "Partial after failure": status is not stale', () => {
 	const failed = reconcile(deepFreeze(stored({ Y: AB })), deepFreeze(fail(15)), ctx).stored;
 	const out = reconcile(deepFreeze(failed), deepFreeze(ok(20, false, [item('A')])), ctx).stored;
-	const model = viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime });
+	const model = viewModel(out, { connection: { kind: 'connected', accountId: 'Y', label: 'y', generation: 1 }, readOnly: false, checking: false }, { now: NOW, formatTime, today: '2026-10-03', threshold: 5 });
 	assert.equal(model.status, 'pending');
 });
 

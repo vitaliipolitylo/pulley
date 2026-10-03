@@ -2,7 +2,8 @@
 title: 'Story 2.3: Read queue state at a glance'
 type: 'feature'
 created: '2026-10-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: '048205f7d847dce62195e2707e07ff80095626b8'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -108,13 +109,13 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/core/types.ts`, `src/core/viewModel.ts`, `src/core/queueViewed.ts`, `src/core/copy.ts` -- model, transition, copy.
-- [ ] `media/corgi/*.svg` -- six state variants.
-- [ ] `src/shell/statusCount.ts`, `src/shell/queueView.ts`, `src/shell/scheduler.ts`, `src/extension.ts`, `package.json` -- rendering, threshold reader, wiring.
-- [ ] `test/core/viewModel.test.ts`, `test/core/queueViewed.test.ts` -- one case per matrix row. Update existing stale cases, which expect `count: null`.
-- [ ] `test/shell/scheduler.test.ts`, `test/core/connection.test.ts` -- threshold reader; manifest mirror.
-- [ ] `test/smoke/queueView.test.ts` -- the count renders and is skipped when unchanged; visibility triggers `queueViewed`; a mascot-only change refreshes the provider; a new request while visible and focused clears `newSignal`, and while unfocused does not; read-only mode runs no `queueViewed`; a render that sets `newSignal` again while a post-render `queueViewed` is in flight triggers one more run after it completes; a persisted `newSignal` is cleared after the first lookup with the view visible.
-- [ ] `docs/spikes/view-prototype.md` -- the checks below.
+- [x] `src/core/types.ts`, `src/core/viewModel.ts`, `src/core/queueViewed.ts`, `src/core/copy.ts` -- model, transition, copy.
+- [x] `media/corgi/*.svg` -- six state variants.
+- [x] `src/shell/statusCount.ts`, `src/shell/queueView.ts`, `src/shell/scheduler.ts`, `src/extension.ts`, `package.json` -- rendering, threshold reader, wiring.
+- [x] `test/core/viewModel.test.ts`, `test/core/queueViewed.test.ts` -- one case per matrix row. Update existing stale cases, which expect `count: null`.
+- [x] `test/shell/scheduler.test.ts`, `test/core/connection.test.ts` -- threshold reader; manifest mirror.
+- [x] `test/smoke/queueView.test.ts` -- the count renders and is skipped when unchanged; visibility triggers `queueViewed`; a mascot-only change refreshes the provider; a new request while visible and focused clears `newSignal`, and while unfocused does not; read-only mode runs no `queueViewed`; a render that sets `newSignal` again while a post-render `queueViewed` is in flight triggers one more run after it completes; a persisted `newSignal` is cleared after the first lookup with the view visible.
+- [x] `docs/spikes/view-prototype.md` -- the checks below (rows added; results still to be filled from a manual run).
 
 **Acceptance Criteria:**
 - Given the view in the sidebar and in the bottom Panel, in light, dark, and high-contrast themes at 150% zoom, then the corgi variants stay recognizable at actual size, each state has words and a count, and keyboard and screen-reader use work with native focus and selection. These results are recorded in `docs/spikes/view-prototype.md`.
@@ -132,8 +133,38 @@ context:
 
 ## Implementation Notes
 
+- `viewModel` adds `countStale`, `mascot`, and `mascotText` on every branch. A helper `lastKnown(lastSuccessAt, n)` gives the stale count for the failure, write-failed, and unauthenticated-with-rows branches. With a prior success and zero rows, a stale count is `0` with `countStale: true`, and the badge then shows nothing. Unauthenticated with no rows stays `null`. `pendingMascot` applies backlog → new → older → waiting. "Older" uses only a finite `requestedAt` with `now − requestedAt ≥ 24 h`.
+- `copy.mascot` holds five fixed lines. `mascotText(mascot, today)` returns `backlogLine(today)` for backlog. `copy.countTooltip(count, stale)` is the badge tooltip. New log lines are `thresholdInvalid` and `queueViewedFailed`.
+- The status row is a `{ kind: 'status', mascot, text }` element, and the provider is `TreeDataProvider<StatusRow | Row>`. `QueueView` now takes `extensionUri` first and exposes `treeView` (the pick adds `badge`, `visible`, and `onDidChangeVisibility`) so the shell can wire the badge and visibility. `openPullRequest` returns `false` for the status row without logging.
+- The `queueViewed` triggers live in `src/shell/queueView.ts`. `createQueueViewedWiring({ store, treeView, onDidChangeWindowState, isFocused, getActiveAccountId, log })` is the composition `extension.ts` calls. It subscribes to the visibility and window-focus events itself and returns `{ afterRender, lookupApplied, dispose }`, so smoke tests fire the injected events against the same code. Its gating logic is `createQueueViewedSync`. `viewed()` runs only when the view is visible and the active account's `newSignal` is `true`, so focus or visibility in read-only mode, or with the signal already false, causes no mutate and no re-render. `lookupApplied(prev, next)` runs on an account change when the view is visible. `afterRender()` is gated on visible, focused, and a fresh `newSignal === true` (`undefined` in read-only mode, X5), and allows at most one call in flight. After a successful call it re-checks. A failed call is logged and not retried until the next render, which avoids a hot loop on persistent write failures.
+- `extension.ts` renders `statusCount` and then `view`, and calls `afterRender` after each render. It re-renders on a `pulley.backlogThreshold` change with no check, write, or alert. `createThresholdReader` logs once per distinct invalid value: non-integers, values below 1, and non-numbers such as strings. An unset value silently uses 5.
+- The corgi art: `waiting.svg` is `mockups/corgi.svg`, and `clear.svg` is `mockups/corgi-resting.svg`. `new` has larger eyes with catchlights and a small tongue. `older` has soft patient brows. `backlog` has a flat mouth and resting paws. `unknown` has open, unfilled eyes and a flat mouth. All six keep the same head, ears, and blaze paths. None is animated.
+
 ## Spec Change Log
 
 - **2026-10-03, Epic 2 spec review fixes:** finding IDs cited inline (A1–A15 = adversarial findings 1–15, E1–E7 = edge-case findings 1–7) refer to `review-epic-2-specs-2026-10-03.md`, not PRD assumptions such as A8. B- and X-IDs refer to the Review Triage Log of `spec-epic-2-spec-review-fixes.md`. This story resolves A1 (`queueViewed` at lookup), A9, E5, B5, and X5.
 
 ## Review Triage Log
+
+Iteration 0 (2026-10-03). Layers: blind (BH), edge-case (EC), verification-gap (VG).
+
+| # | Finding | Verdict | Evidence | Route |
+|---|---------|---------|----------|-------|
+| BH1 / EC2 | `viewed()` (focus, visibility, lookup) runs `store.mutate` without checking `newSignal` or read-only | low | `store.mutate` always calls `notify()` (store.ts, read-only and unchanged paths), so every focus causes an extra re-render and a read-only mutate attempt; fixed by a guard on an existing condition | patch |
+| BH2 / EC1 | Visibility clears `newSignal` in an unfocused window | false | The spec lists `onDidChangeVisibility(visible)` as a trigger with no focus condition; B5 needs focus only for the post-render trigger | reject |
+| BH3 / EC4 | Account id read at enqueue, not at check time; a switch in between could clear another account | low | Requires an account switch between enqueue and the serialized mutate; unlikely, and the fix adds parameters | reject |
+| BH4 | `viewed()` and `afterRender` don't share the in-flight guard | low | Store serializes calls; after BH1 the extra runs are guarded no-ops | reject |
+| BH5 / EC6 | Corgi art has one fixed stroke color; may be illegible in dark/high-contrast | maybe-false | Poses differ in dark strokes on the cream blaze, which may stay legible; settled by the manual theme check in `view-prototype.md` (medium if true) | defer |
+| BH6 | `older`/`waiting`/`backlog` poses may be indistinguishable at 16 px | maybe-false | Spec asks for subtle variants with words carrying the state; whether they read at actual size needs rendering (medium if true) | defer |
+| BH7 | SVG base paths duplicated; `role`/`aria-label` inert as tree icon | low | Developer-only drift risk; accessible name comes from `accessibilityInformation` | reject |
+| BH8 | Setting is `type: number`, not `integer` | false | Spec prescribes "number"; fix would edit the spec | reject |
+| BH9 | Threshold reader lives in `scheduler.ts` | false | Code Map places `createThresholdReader` in `scheduler.ts` | reject |
+| BH10 | "more than a day" text vs `>= 24 h` rule | false | Both the copy and the ≥ 24 h rule come from the frozen spec; fix would edit the spec | reject |
+| BH11 | Backlog pose for incomplete-only pending with null count | false | Spec: `pending` → backlog when rows ≥ threshold, with no count condition | reject |
+| BH12 / VG1 | The `queueViewed` wiring in `extension.ts` is never exercised; smoke tests re-implement it | medium | VG pre-verified: deleting `afterRender()`, the visibility subscription, or the focus call passes all tests | patch |
+| VG2 | Badge and threshold re-render wiring in `activate` untested at its consumer | medium | VG pre-verified, filed defer; needs an activation harness with a session seam | defer |
+| BH13 | Stale queue with 0 rows hides badge and status row | false | Matches the spec: no badge for 0, no status row for `unknown` without rows; message explains | reject |
+| BH14 | Overlapping renders can leave badge and tree briefly out of sync | low | Each render reads fresh state; the last one wins within a tick; negligible | reject |
+| BH15 | Test leftovers (`tree.visible = true` unused) and import order | low | Misleading test line; trivially removed with the BH12 test rewrite | patch |
+| EC3 | `newSignal` cleared while the `new` pose isn't shown (backlog/unknown) | false | Spec defines viewing the queue, not seeing the pose, as what ends the signal | reject |
+| EC5 | A hung `memento.update` keeps `inFlight` true forever | low | Speculative; no evidence `memento.update` hangs; fix adds a timeout | reject |

@@ -252,6 +252,32 @@ export function createIntervalReader(read: () => unknown, log: (line: string) =>
 	};
 }
 
+export const THRESHOLD_DEFAULT = 5;
+
+/**
+ * Reads `pulley.backlogThreshold` (Story 2.3): an unset value uses the default; any other value
+ * that is not an integer of at least 1 (2.5, 0, a string) uses the default and is logged once per
+ * distinct value. Presentation only: reading it never checks, writes, or alerts.
+ */
+export function createThresholdReader(read: () => unknown, log: (line: string) => void): () => number {
+	const logged = new Set<string>();
+	return () => {
+		const raw = read();
+		if (raw === undefined) {
+			return THRESHOLD_DEFAULT;
+		}
+		if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 1) {
+			return raw;
+		}
+		const key = typeof raw === 'string' ? JSON.stringify(raw) : String(raw);
+		if (!logged.has(key)) {
+			logged.add(key);
+			log(copy.log.thresholdInvalid(key, THRESHOLD_DEFAULT));
+		}
+		return THRESHOLD_DEFAULT;
+	};
+}
+
 /**
  * The local calendar day of `ms` as `YYYY-MM-DD` (the `today` of every transition ctx, AD-8). Uses
  * the machine's time zone, never UTC, so a reminder day follows the user's own midnight.

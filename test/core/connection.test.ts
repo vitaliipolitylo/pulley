@@ -61,7 +61,13 @@ test('package.json strings mirror copy.ts', () => {
 		{ type: 'number', default: 15, minimum: 5, maximum: 240, scope: 'application', markdownDescription: undefined },
 	);
 	assert.equal(interval.markdownDescription, copy.checkIntervalDescription);
-	assert.deepEqual(Object.keys(pkg.contributes.configuration.properties), ['pulley.checkIntervalMinutes']);
+	const threshold = pkg.contributes.configuration.properties['pulley.backlogThreshold'];
+	assert.deepEqual(
+		{ ...threshold, markdownDescription: undefined },
+		{ type: 'number', default: 5, minimum: 1, scope: 'application', markdownDescription: undefined },
+	);
+	assert.equal(threshold.markdownDescription, copy.backlogThresholdDescription);
+	assert.deepEqual(Object.keys(pkg.contributes.configuration.properties), ['pulley.checkIntervalMinutes', 'pulley.backlogThreshold']);
 	assert.equal(pkg.contributes.keybindings, undefined, 'no custom keyboard shortcut');
 	assert.deepEqual(pkg.contributes.menus.commandPalette, [
 		{ command: 'pulley.openPullRequest', when: 'false' },

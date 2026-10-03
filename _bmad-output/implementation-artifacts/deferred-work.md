@@ -37,3 +37,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-get-one-useful-alert-for-a-new-request.md`
   summary: Update architecture AD-7 (and epic-2-context) so the new/backlog gap is measured from the previous `lastSuccessAt`, not `lastAttemptAt`.
   evidence: Story 2.1 review loop 1 changed the predicate with the user's approval because a failed attempt shortened the gap and turned a closed-VS-Code backlog into per-item notifications; the planning docs still state the old rule.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-read-queue-state-at-a-glance.md`
+  summary: Corgi SVGs use one fixed outline color with no dark/high-contrast variant, so pose details may be illegible on dark themes.
+  evidence: Unverified (medium if true); settled by running the dark and high-contrast rows of the corgi checks in docs/spikes/view-prototype.md.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-read-queue-state-at-a-glance.md`
+  summary: The older, waiting, and backlog corgi poses differ only by hairline details and may be indistinguishable at tree-icon size.
+  evidence: Unverified (medium if true); settled by viewing media/corgi/*.svg at actual 16 px size in the manual check.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-read-queue-state-at-a-glance.md`
+  summary: The badge render and pulley.backlogThreshold re-render wiring in activate() has no test at its consumer.
+  evidence: Removing statusCount.render, hard-coding threshold 5, or deleting the THRESHOLD_SETTING branch passes every test; needs an activation-level harness with an injectable session.

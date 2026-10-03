@@ -1,7 +1,7 @@
 // Every user-facing string Pulley shows lives here.
 // Strings that VS Code reads from package.json (view names, command titles,
 // welcome content) are mirrored there; test/core/connection.test.ts keeps them in sync.
-import type { FailureAction, FailureReason, RequestItem } from './types.ts';
+import type { FailureAction, FailureReason, Mascot, RequestItem } from './types.ts';
 
 export const copy = {
 	viewContainerTitle: 'Pulley',
@@ -11,6 +11,8 @@ export const copy = {
 	openPullRequestCommandTitle: 'Open Pull Request',
 	refreshCommandTitle: 'Refresh review requests',
 	checkIntervalDescription: 'How often Pulley checks GitHub for review requests, in minutes (5–240).',
+	backlogThresholdDescription:
+		'How many waiting reviews the corgi treats as a backlog (minimum 1). Changes only what Pulley shows; it never checks GitHub or notifies.',
 	debugSeedCommandTitle: 'Debug Seed',
 	outputChannelName: 'Pulley',
 
@@ -82,6 +84,23 @@ export const copy = {
 	/** The aggregate backlog notification: the count, then the day's gentle line. */
 	backlogNotification: (count: number, today: string): string => `${copy.pending(count)} ${backlogLine(today)}`,
 
+	/**
+	 * Word equivalents of the corgi states (Story 2.3). `backlog` uses the day's `backlogLine`, so
+	 * it lives in `mascotText`, not here.
+	 */
+	mascot: {
+		new: 'The corgi spotted a new request.',
+		older: 'A request has waited more than a day.',
+		waiting: 'The corgi is waiting with you.',
+		clear: 'The corgi is resting.',
+		unknown: "The corgi can't confirm the queue right now.",
+	},
+	/** Appended to the count badge's tooltip when the count is the last known one. */
+	countLastKnown: "Last known count; Pulley couldn't confirm it.",
+	/** The count badge's tooltip (its accessible text): the count in words, qualified when stale. */
+	countTooltip: (count: number, stale: boolean): string =>
+		stale ? `${copy.pending(count)} ${copy.countLastKnown}` : copy.pending(count),
+
 	log: {
 		/** `ref` is `owner/name#number` only: never the title or other PR content. */
 		notifiedNew: (ref: string): string => `Notified about a new review request: ${ref}.`,
@@ -138,6 +157,9 @@ export const copy = {
 		intervalClamped: (raw: string, minutes: number): string =>
 			`pulley.checkIntervalMinutes ${raw} is out of range (5–240); using ${minutes}.`,
 		intervalRestarted: (minutes: number): string => `Check interval is ${minutes} min; the timer restarted.`,
+		thresholdInvalid: (raw: string, used: number): string =>
+			`pulley.backlogThreshold ${raw} is not a whole number of at least 1; using ${used}.`,
+		queueViewedFailed: (reason: string): string => `Marking the review queue as viewed failed: ${reason}`,
 	},
 } as const;
 
@@ -152,6 +174,11 @@ export function backlogLine(today: string): string {
 		hash = Math.imul(hash, 0x01000193) >>> 0;
 	}
 	return copy.backlogLines[hash % copy.backlogLines.length];
+}
+
+/** The word equivalent of a corgi state; `backlog` reads the day's backlog line (Story 2.2). */
+export function mascotText(mascot: Mascot, today: string): string {
+	return mascot === 'backlog' ? backlogLine(today) : copy.mascot[mascot];
 }
 
 /** The viewsWelcome markdown shown while unconnected (mirrored in package.json). */
