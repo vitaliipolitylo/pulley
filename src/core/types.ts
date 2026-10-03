@@ -43,10 +43,10 @@ export type CheckResult = CheckSuccess | CheckFailure;
 // Stored state (AD-4). One JSON value in globalState under `pulley.state.v1`.
 // ---------------------------------------------------------------------------
 
-/** How a tracked request was first classified (AD-7). Epic 1 writes only `'backlog'`. */
+/** How a tracked request was first classified (AD-7); never recomputed while the item stays. */
 export type Origin = 'new' | 'backlog';
 
-/** Per-item alert state (AD-9). Epic 1 writes only `'none'`. */
+/** Per-item alert state (AD-9): a new item is `'pending'` until a focused window marks it `'shown'`. */
 export type AlertState = 'none' | 'pending' | 'shown';
 
 /** Backlog reminder state (AD-8). Epic 1 writes only `'none'`. */
@@ -74,6 +74,10 @@ export interface Account {
 	/** Local `YYYY-MM-DD` of the last backlog reminder (Epic 2). */
 	lastBacklogReminderDate?: string;
 	backlogAlert: BacklogAlert;
+	/**
+	 * Set by an applied success that adds a new item; cleared by an applied success that adds none
+	 * (AD-7). Failures and rule-4 no-op successes leave it unchanged.
+	 */
 	newSignal: boolean;
 	items: { [prNodeId: string]: Tracked };
 }
@@ -83,10 +87,13 @@ export interface Stored {
 	accounts: { [accountId: string]: Account };
 }
 
-/** Effects a transition asks the shell to run after the write (AD-2). Closed union. */
+/**
+ * Effects a transition asks the shell to run after the write (AD-2). Closed union. Each effect
+ * carries its account, so the shell resolves it from that partition, never the active account.
+ */
 export type Effect =
-	| { kind: 'notifyNew'; itemId: string }
-	| { kind: 'notifyBacklog'; count: number; firstConnection: boolean };
+	| { kind: 'notifyNew'; accountId: string; itemId: string }
+	| { kind: 'notifyBacklog'; accountId: string; count: number; firstConnection: boolean };
 
 /** Every durable change: `(stored, input, ctx) → { stored, effects }`. */
 export interface TransitionResult {

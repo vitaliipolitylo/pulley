@@ -20,7 +20,7 @@ function deepFreeze<T>(value: T): T {
 
 const NOW = 50_000;
 const INTERVAL = 900_000;
-const ctx: ReconcileCtx = { now: NOW, activeAccountId: 'Y', intervalMs: INTERVAL };
+const ctx: ReconcileCtx = { now: NOW, activeAccountId: 'Y', intervalMs: INTERVAL, windowFocused: false };
 
 const item = (id: string, extra: Partial<RequestItem> = {}): RequestItem => ({
 	id,
@@ -38,6 +38,9 @@ const tracked = (id: string, firstSeenAt: number, extra: Partial<Tracked> = {}):
 	alert: 'none',
 	...extra,
 });
+/** A newly observed item classified new: its alert is pending. */
+const newTracked = (id: string, firstSeenAt: number, extra: Partial<Tracked> = {}): Tracked =>
+	tracked(id, firstSeenAt, { origin: 'new', alert: 'pending', ...extra });
 const account = (extra: Partial<Account> = {}): Account => ({ ...emptyAccount(), ...extra });
 const stored = (accounts: Record<string, Account>): Stored => ({ schemaVersion: 1, accounts });
 const itemsOf = (...list: Tracked[]): Account['items'] => Object.fromEntries(list.map((t) => [t.id, t]));
@@ -126,17 +129,18 @@ const cases: Case[] = [
 				...attempt(20),
 				lastSuccessAt: 20,
 				lastAppliedFetchStartedAt: 20,
+				newSignal: true,
 				items: itemsOf(
 					// requester is dropped because the latest result no longer reports it.
 					{ ...item('A', { title: 'Renamed', number: 99, requestedAt: 7 }), firstSeenAt: 1, origin: 'new', alert: 'shown' },
 					tracked('B', 2),
-					{ ...item('C', { requester: 'carol', requestedAt: 9 }), firstSeenAt: NOW, origin: 'backlog', alert: 'none' },
+					{ ...item('C', { requester: 'carol', requestedAt: 9 }), firstSeenAt: NOW, origin: 'new', alert: 'pending' },
 				),
 			},
 		}),
 	},
 	{
-		name: 'rule 5: first success sets firstCheckDone with neutral Epic 2 defaults',
+		name: 'rule 5 / matrix "Before baseline": first success sets firstCheckDone; added items are backlog',
 		stored: stored({}),
 		result: ok(5, true, [item('A')]),
 		expected: stored({
@@ -181,7 +185,7 @@ const cases: Case[] = [
 		stored: stored({ Y: AB }),
 		result: ok(20, false, [item('C')]),
 		expected: stored({
-			Y: { ...AB, ...attempt(20), lastIncompleteFetchStartedAt: 20, items: itemsOf(tracked('A', 1), tracked('B', 2), tracked('C', NOW)) },
+			Y: { ...AB, ...attempt(20), lastIncompleteFetchStartedAt: 20, newSignal: true, items: itemsOf(tracked('A', 1), tracked('B', 2), newTracked('C', NOW)) },
 		}),
 	},
 	{
@@ -233,7 +237,8 @@ const cases: Case[] = [
 				lastIncompleteFetchStartedAt: 9,
 				lastSuccessAt: 4,
 				lastAppliedFetchStartedAt: 4,
-				items: itemsOf(tracked('A', 1, { title: 'Newer A' }), tracked('B', 2), tracked('C', NOW)),
+				newSignal: true,
+				items: itemsOf(tracked('A', 1, { title: 'Newer A' }), tracked('B', 2), newTracked('C', NOW)),
 			},
 		}),
 	},
@@ -275,7 +280,7 @@ test('matrix "Reappearance": B removed, later returned is a new Tracked with a n
 	const afterRemoval = reconcile(deepFreeze(stored({ Y: AB })), deepFreeze(ok(20, true, [item('A')])), ctx).stored;
 	assert.equal(afterRemoval.accounts.Y.items.B, undefined);
 	const back = reconcile(deepFreeze(afterRemoval), deepFreeze(ok(30, true, [item('A'), item('B')])), { ...ctx, now: 77_000 }).stored;
-	assert.deepEqual(back.accounts.Y.items.B, tracked('B', 77_000));
+	assert.deepEqual(back.accounts.Y.items.B, newTracked('B', 77_000));
 	assert.equal(back.accounts.Y.items.A.firstSeenAt, 1);
 });
 
@@ -304,4 +309,250 @@ test('optional fields are omitted rather than set to undefined', () => {
 	assert.deepEqual(out, json);
 	assert.ok(!('requester' in out.accounts.Y.items.A));
 	assert.ok(!('lastFailure' in out.accounts.Y));
+});
+
+// ---------------------------------------------------------------------------
+// Story 2.1: new/backlog classification, newSignal, and focus-gated delivery (AD-7, AD-9).
+// The interval I = 900 000 ms and the previous attempt was at T.
+// ---------------------------------------------------------------------------
+
+const T = 1_000_000;
+const I = INTERVAL;
+const focused: ReconcileCtx = { ...ctx, windowFocused: true };
+/** The baseline is done: a complete success at T, with the given fields. */
+const baseline = (extra: Partial<Account> = {}): Account =>
+	account({ firstCheckDone: true, ...attempt(T), lastSuccessAt: T, lastAppliedFetchStartedAt: T, ...extra });
+/** A complete success applied at `at`. */
+const completeAt = (at: number) => ({ ...attempt(at), lastSuccessAt: at, lastAppliedFetchStartedAt: at });
+const notifyNew = (itemId: string, accountId = 'Y') => ({ kind: 'notifyNew' as const, accountId, itemId });
+
+interface AlertCase {
+	name: string;
+	stored: Stored;
+	result: CheckResult;
+	ctx: ReconcileCtx;
+	/** Expected stored output; `'same'` means the very same input object. */
+	expected: Stored | 'same';
+	effects: ReturnType<typeof notifyNew>[];
+}
+
+const alertCases: AlertCase[] = [
+	{
+		name: 'matrix "New, focused": a complete success at T+I adds X: new/shown, newSignal, one notifyNew',
+		stored: stored({ Y: baseline() }),
+		result: ok(T + I, true, [item('X')]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), newSignal: true, items: itemsOf(newTracked('X', NOW, { alert: 'shown' })) }) }),
+		effects: [notifyNew('X')],
+	},
+	{
+		name: 'matrix "New, unfocused": X is pending and nothing is emitted',
+		stored: stored({ Y: baseline() }),
+		result: ok(T + I, true, [item('X')]),
+		ctx,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), newSignal: true, items: itemsOf(newTracked('X', NOW)) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Gap": a success at T+2I+1 adds X as backlog with no effect; newSignal false',
+		stored: stored({ Y: baseline({ newSignal: true }) }),
+		result: ok(T + 2 * I + 1, true, [item('X')]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + 2 * I + 1), newSignal: false, items: itemsOf(tracked('X', NOW)) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Gap boundary": a success at exactly T+2I adds X as new',
+		stored: stored({ Y: baseline() }),
+		result: ok(T + 2 * I, true, [item('X')]),
+		ctx,
+		expected: stored({ Y: baseline({ ...completeAt(T + 2 * I), newSignal: true, items: itemsOf(newTracked('X', NOW)) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Before baseline": only incomplete successes so far (no lastSuccessAt), so added items are backlog',
+		stored: stored({ Y: account({ firstCheckDone: true, ...attempt(T), lastIncompleteFetchStartedAt: T }) }),
+		result: ok(T + I, false, [item('X')]),
+		ctx: focused,
+		expected: stored({ Y: account({ firstCheckDone: true, ...attempt(T + I), lastIncompleteFetchStartedAt: T + I, items: itemsOf(tracked('X', NOW)) }) }),
+		effects: [],
+	},
+	{
+		name: 'baseline predicate: an unknown previous interval makes added items backlog',
+		stored: stored({ Y: { ...baseline(), lastAttemptIntervalMs: undefined } }),
+		result: ok(T + I, true, [item('X')]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), items: itemsOf(tracked('X', NOW)) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Already shown": a later poll that still has X emits nothing more',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }),
+		result: ok(T + I, true, [item('X')]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), newSignal: false, items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Re-request kept": requester/requestedAt change updates metadata only; origin and alert stay',
+		stored: stored({ Y: baseline({ items: itemsOf(newTracked('X', 5, { alert: 'shown', requester: 'bob', requestedAt: 1 })) }) }),
+		result: ok(T + I, true, [item('X', { requester: 'carol', requestedAt: 2 })]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), items: itemsOf(newTracked('X', 5, { alert: 'shown', requester: 'carol', requestedAt: 2 })) }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Incomplete omits": X pending; an incomplete success lacking X keeps it pending',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		result: ok(T + I, false, [item('Z')]),
+		ctx,
+		expected: stored({
+			Y: baseline({ ...attempt(T + I), lastIncompleteFetchStartedAt: T + I, newSignal: true, items: itemsOf(newTracked('X', 5), newTracked('Z', NOW)) }),
+		}),
+		effects: [],
+	},
+	{
+		name: 'matrix "Gone first": X pending is deleted by a complete check before focus, so no effect',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		result: ok(T + I, true, []),
+		ctx: focused,
+		expected: stored({ Y: baseline({ ...completeAt(T + I), newSignal: false }) }),
+		effects: [],
+	},
+	{
+		name: 'matrix "Focused failure" (A2): queue and newSignal unchanged; X shown and emitted',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5), tracked('B', 2)) }) }),
+		result: fail(T + I),
+		ctx: focused,
+		expected: stored({
+			Y: baseline({
+				...attempt(T + I),
+				lastFailure: { at: T + I, reason: 'network' },
+				newSignal: true,
+				items: itemsOf(newTracked('X', 5, { alert: 'shown' }), tracked('B', 2)),
+			}),
+		}),
+		effects: [notifyNew('X')],
+	},
+	{
+		name: 'unfocused failure: nothing delivered, X stays pending',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		result: fail(T + I),
+		ctx,
+		expected: stored({ Y: baseline({ ...attempt(T + I), lastFailure: { at: T + I, reason: 'network' }, newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		effects: [],
+	},
+	{
+		name: 'rule-4 no-op, focused: attempt fields recorded, newSignal unchanged, pending X delivered',
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		result: ok(T, true, [item('Z')]),
+		ctx: focused,
+		expected: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }),
+		effects: [notifyNew('X')],
+	},
+	{
+		name: "matrix \"Rule-1 rejection\" (A2, X3): another account's result is dropped; Y's pending X is delivered once",
+		stored: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5)) }) }),
+		result: ok(T + I, true, [item('Q')], 'Z'),
+		ctx: focused,
+		expected: stored({ Y: baseline({ newSignal: true, items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }),
+		effects: [notifyNew('X')],
+	},
+	{
+		name: 'rule-1 rejection with nothing pending returns the same stored',
+		stored: stored({ Y: baseline({ items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }),
+		result: fail(T + I, 'Z'),
+		ctx: focused,
+		expected: 'same',
+		effects: [],
+	},
+	{
+		name: 'rule-1 rejection, unfocused: same stored even with something pending',
+		stored: stored({ Y: baseline({ items: itemsOf(newTracked('X', 5)) }) }),
+		result: fail(T + I, 'Z'),
+		ctx,
+		expected: 'same',
+		effects: [],
+	},
+	{
+		name: 'X3: no active account gives the same stored and delivers nothing',
+		stored: stored({ Y: baseline({ items: itemsOf(newTracked('X', 5)) }) }),
+		result: ok(T + I, true, [item('Q')]),
+		ctx: { ...focused, activeAccountId: undefined },
+		expected: 'same',
+		effects: [],
+	},
+	{
+		name: 'X3: an active account absent from stored gives the same stored on a rule-1 rejection',
+		stored: stored({ Y: baseline({ items: itemsOf(newTracked('X', 5)) }) }),
+		result: fail(T + I, null),
+		ctx: { ...focused, activeAccountId: 'W' },
+		expected: 'same',
+		effects: [],
+	},
+	{
+		name: 'several new items in one focused success: one notifyNew each, sorted by id',
+		stored: stored({ Y: baseline() }),
+		result: ok(T + I, true, [item('C'), item('A'), item('B')]),
+		ctx: focused,
+		expected: stored({
+			Y: baseline({
+				...completeAt(T + I),
+				newSignal: true,
+				items: itemsOf(newTracked('C', NOW, { alert: 'shown' }), newTracked('A', NOW, { alert: 'shown' }), newTracked('B', NOW, { alert: 'shown' })),
+			}),
+		}),
+		effects: [notifyNew('A'), notifyNew('B'), notifyNew('C')],
+	},
+];
+
+for (const c of alertCases) {
+	test(`story 2.1 / ${c.name}`, () => {
+		const input = deepFreeze(c.stored);
+		const out = reconcile(input, deepFreeze(c.result), c.ctx);
+		assert.deepEqual(out.effects, c.effects);
+		if (c.expected === 'same') {
+			assert.equal(out.stored, input);
+		} else {
+			assert.deepEqual(out.stored, c.expected);
+		}
+	});
+}
+
+test('story 2.1 / matrix "New cycle": a complete check omits X, then X returns without a gap as a new pending alert, delivered once', () => {
+	const shown = deepFreeze(stored({ Y: baseline({ items: itemsOf(newTracked('X', 5, { alert: 'shown' })) }) }));
+	const removed = reconcile(shown, deepFreeze(ok(T + I, true, [])), focused);
+	assert.deepEqual(removed.effects, []);
+	assert.equal(removed.stored.accounts.Y.items.X, undefined);
+	const back = reconcile(deepFreeze(removed.stored), deepFreeze(ok(T + 2 * I, true, [item('X')])), ctx);
+	assert.deepEqual(back.stored.accounts.Y.items.X, newTracked('X', NOW));
+	assert.deepEqual(back.effects, []);
+	const delivered = reconcile(deepFreeze(back.stored), deepFreeze(ok(T + 3 * I, true, [item('X')])), focused);
+	assert.deepEqual(delivered.effects, [notifyNew('X')]);
+	const again = reconcile(deepFreeze(delivered.stored), deepFreeze(ok(T + 4 * I, true, [item('X')])), focused);
+	assert.deepEqual(again.effects, []);
+});
+
+test('story 2.1 / matrix "Failure after a gap": a failure at T+3I, then a complete success at T+3I+I/2 adds X as backlog', () => {
+	const failed = reconcile(deepFreeze(stored({ Y: baseline() })), deepFreeze(fail(T + 3 * I)), focused);
+	assert.deepEqual(failed.effects, []);
+	const out = reconcile(deepFreeze(failed.stored), deepFreeze(ok(T + 3 * I + I / 2, true, [item('X')])), focused);
+	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.stored.accounts.Y.items.X, tracked('X', NOW));
+	assert.equal(out.stored.accounts.Y.newSignal, false);
+});
+
+test('story 2.1 / matrix "Incomplete inside gap": an incomplete success at T+I, then a complete success at T+2I+1 adds X as backlog', () => {
+	const partial = reconcile(deepFreeze(stored({ Y: baseline() })), deepFreeze(ok(T + I, false, [])), focused);
+	const out = reconcile(deepFreeze(partial.stored), deepFreeze(ok(T + 2 * I + 1, true, [item('X')])), focused);
+	assert.deepEqual(out.effects, []);
+	assert.deepEqual(out.stored.accounts.Y.items.X, tracked('X', NOW));
+	assert.equal(out.stored.accounts.Y.newSignal, false);
+});
+
+test('story 2.1 / rule-1 rejection delivers only the active account; the other account is untouched', () => {
+	const input = deepFreeze(stored({ Y: baseline({ items: itemsOf(newTracked('X', 5)) }), Z: baseline({ items: itemsOf(newTracked('Q', 5)) }) }));
+	const out = reconcile(input, deepFreeze(fail(T + I, 'Z')), focused);
+	assert.deepEqual(out.effects, [notifyNew('X')]);
+	assert.equal(out.stored.accounts.Z, input.accounts.Z);
 });

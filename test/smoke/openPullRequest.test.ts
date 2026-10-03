@@ -41,7 +41,7 @@ suite('pulley.openPullRequest', () => {
 	suiteSetup(async () => {
 		api = await pulleyApi();
 		const now = Date.now();
-		await api.store.mutate(reconcile, fiftyResult(ACCOUNT, now), { now, activeAccountId: ACCOUNT, intervalMs: 15 * 60 * 1000 });
+		await api.store.mutate(reconcile, fiftyResult(ACCOUNT, now), { now, activeAccountId: ACCOUNT, intervalMs: 15 * 60 * 1000, windowFocused: false });
 		const read = api.store.read();
 		assert.ok(!read.readOnly);
 		rows = viewModel(

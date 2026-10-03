@@ -6,7 +6,7 @@
 # Retrospective: optional, done
 
 generated: 09-30-2026 01:51
-last_updated: 10-02-2026 16:00
+last_updated: 10-03-2026 17:30
 project: Pulley
 project_key: NOKEY
 tracking_system: file-system
@@ -22,8 +22,8 @@ development_status:
   1-6-recover-from-missing-or-uncertain-github-data: review
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-get-one-useful-alert-for-a-new-request: backlog
+  epic-2: in-progress
+  2-1-get-one-useful-alert-for-a-new-request: review
   2-2-return-to-a-backlog-with-a-daily-limit: backlog
   2-3-read-queue-state-at-a-glance: backlog
   2-4-package-and-technically-dogfood-the-calm-mvp: backlog

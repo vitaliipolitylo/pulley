@@ -467,7 +467,7 @@ test('nextConnection: other results leave the connection unchanged', () => {
 
 test('chain: a 401 applied via nextConnection + reconcile + viewModel keeps the rows and offers reconnect', () => {
 	const item = { id: 'PR_1', repo: 'octo/app', number: 1, title: 'Fix', author: 'bob', url: 'https://github.com/octo/app/pull/1' };
-	const rctx = { now: 10, activeAccountId: 'A', intervalMs: 15 * MIN };
+	const rctx = { now: 10, activeAccountId: 'A', intervalMs: 15 * MIN, windowFocused: false };
 	const succeeded = reconcile({ schemaVersion: 1, accounts: {} }, { ok: true, accountId: 'A', fetchStartedAt: 5, complete: true, items: [item] }, rctx).stored;
 	const failure: CheckResult = { ok: false, accountId: 'A', fetchStartedAt: 9, reason: 'unauthenticated' };
 	const connection = nextConnection(connectedA, failure, 3);

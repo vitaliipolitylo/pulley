@@ -99,6 +99,58 @@ for (const [name, raw] of badAccountFields) {
 	});
 }
 
+// Story 2.1: alert fields must be inside their unions before core reads them.
+const itemWith = (extra: Record<string, unknown>) => acct({ items: { A: { ...v1.accounts.Y.items.A, ...extra } } });
+const badAlertFields: Array<[string, unknown, RegExp]> = [
+	['item alert is unknown', itemWith({ alert: 'sent' }), /invalid alert/],
+	['item alert is missing', itemWith({ alert: undefined }), /invalid alert/],
+	['item origin is unknown', itemWith({ origin: 'old' }), /invalid origin/],
+	['item origin is missing', itemWith({ origin: undefined }), /invalid origin/],
+	['account newSignal is a string', acct({ newSignal: 'yes' }), /invalid newSignal/],
+	['account newSignal is missing', acct({ newSignal: undefined }), /invalid newSignal/],
+	['lastAttemptIntervalMs is a string', acct({ lastAttemptIntervalMs: '900000' }), /invalid lastAttemptIntervalMs/],
+	['lastAttemptIntervalMs is zero', acct({ lastAttemptIntervalMs: 0 }), /invalid lastAttemptIntervalMs/],
+	['lastAttemptIntervalMs is negative', acct({ lastAttemptIntervalMs: -1 }), /invalid lastAttemptIntervalMs/],
+	['lastAttemptIntervalMs is null', acct({ lastAttemptIntervalMs: null }), /invalid lastAttemptIntervalMs/],
+];
+
+for (const [name, raw, problem] of badAlertFields) {
+	test(`malformed alert field (${name}) is empty v1 with a named problem`, () => {
+		const result = migrate(JSON.parse(JSON.stringify(raw)));
+		assert.ok(!result.readOnly);
+		assert.deepEqual(result.stored, emptyStored());
+		assert.match(result.malformed ?? '', problem);
+	});
+}
+
+test('lastAttemptIntervalMs: Infinity and NaN are rejected; a positive finite value is accepted', () => {
+	// Not JSON-round-tripped: JSON would turn these into null.
+	for (const bad of [Infinity, NaN]) {
+		const result = migrate(acct({ lastAttemptIntervalMs: bad }));
+		assert.ok(!result.readOnly);
+		assert.match(result.malformed ?? '', /invalid lastAttemptIntervalMs/);
+	}
+	const raw = acct({ lastAttemptIntervalMs: 900_000 });
+	const result = migrate(raw);
+	assert.ok(!result.readOnly);
+	assert.equal(result.malformed, undefined);
+	assert.equal(result.stored, raw);
+});
+
+test('every valid origin, alert, and newSignal value is accepted as-is', () => {
+	for (const origin of ['new', 'backlog']) {
+		for (const alert of ['none', 'pending', 'shown']) {
+			for (const newSignal of [true, false]) {
+				const raw = { schemaVersion: 1, accounts: { Y: { ...v1.accounts.Y, newSignal, items: { A: { ...v1.accounts.Y.items.A, origin, alert } } } } };
+				const result = migrate(raw);
+				assert.ok(!result.readOnly);
+				assert.equal(result.malformed, undefined);
+				assert.equal(result.stored, raw);
+			}
+		}
+	}
+});
+
 test('valid timestamps at the edge of Date range and every failure reason are accepted', () => {
 	for (const reason of ['signed_out', 'unauthenticated', 'network', 'rate_limited', 'graphql_error']) {
 		const raw = acct({ lastAttemptAt: 8.64e15, lastIncompleteFetchStartedAt: -8.64e15, lastFailure: { at: 9, reason } });

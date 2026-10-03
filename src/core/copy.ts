@@ -1,7 +1,7 @@
 // Every user-facing string Pulley shows lives here.
 // Strings that VS Code reads from package.json (view names, command titles,
 // welcome content) are mirrored there; test/core/connection.test.ts keeps them in sync.
-import type { FailureAction, FailureReason } from './types.ts';
+import type { FailureAction, FailureReason, RequestItem } from './types.ts';
 
 export const copy = {
 	viewContainerTitle: 'Pulley',
@@ -59,7 +59,23 @@ export const copy = {
 	debugSeedNeedsConnection: 'Connect to GitHub before running Pulley: Debug Seed. Seeded rows go into the active account.',
 	debugSeedDone: (n: number): string => `Pulley seeded ${n} synthetic review requests. The next complete check replaces them.`,
 
+	/**
+	 * The native notification for one new direct review request (Story 2.1). Names the requester
+	 * only when `github.ts` verified the request was for the viewer; otherwise labels the author.
+	 */
+	newRequestNotification: (item: Pick<RequestItem, 'repo' | 'number' | 'title' | 'author' | 'requester'>): string =>
+		`Pulley spotted a review request for ${item.repo}#${item.number}: '${item.title}'.` +
+		(item.requester !== undefined ? ` Requested by ${item.requester}.` : ` Author: ${item.author}.`),
+
 	log: {
+		/** `ref` is `owner/name#number` only: never the title or other PR content. */
+		notifiedNew: (ref: string): string => `Notified about a new review request: ${ref}.`,
+		/** `subject` is `owner/name#number`, or the count for a backlog reminder. No retry follows. */
+		notifyFailed: (subject: string): string => `Showing the notification failed for ${subject}; it will not be retried.`,
+		notifyItemMissing: (accountId: string, itemId: string): string =>
+			`Notification skipped: item ${itemId} is not in account ${accountId}'s stored state.`,
+		effectsFailed: (reason: string): string => `Running effects after a write failed: ${reason}`,
+		focusDeliveryFailed: (reason: string): string => `Delivering pending alerts on focus failed: ${reason}`,
 		connectStarted: 'Connect requested.',
 		connectFailed: (reason: string): string => `Connect did not complete: ${reason}`,
 		silentLookupFailed: (reason: string): string => `GitHub session lookup failed: ${reason}`,

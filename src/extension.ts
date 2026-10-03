@@ -16,7 +16,8 @@ import {
 	nextConnection,
 	type Scheduler,
 } from './shell/scheduler.ts';
-import { createStore, type Store } from './shell/store.ts';
+import { createAlertingStore } from './shell/alertWiring.ts';
+import type { Store } from './shell/store.ts';
 import { FIFTY, fiftyResult } from '../test/smoke/fixtures/fifty.ts';
 
 const INTERVAL_SETTING = 'pulley.checkIntervalMinutes';
@@ -32,7 +33,15 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 	const output = vscode.window.createOutputChannel(copy.outputChannelName);
 	const log = (line: string): void => output.appendLine(`[${new Date().toISOString()}] ${line}`);
 	const view = new QueueView();
-	const store = createStore(context.globalState, log);
+	// Notifications run only after the store's write resolves, composed from the written state.
+	// The button opens the PR through the same https://github.com/ guard as a row.
+	const { store, focusDelivery } = createAlertingStore({
+		memento: context.globalState,
+		log,
+		showMessage: (text, button) => vscode.window.showInformationMessage(text, button),
+		openExternal: (uri) => vscode.env.openExternal(uri),
+		isFocused: () => vscode.window.state.focused,
+	});
 	context.subscriptions.push(output, view);
 
 	// Window memory only (never persisted): the connection (and so the active account), the
@@ -89,7 +98,12 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			return;
 		}
 		try {
-			await store.mutate(reconcile, result, { now: Date.now(), activeAccountId: activeAccountId(connection), intervalMs: getIntervalMs() });
+			await store.mutate(reconcile, result, {
+				now: Date.now(),
+				activeAccountId: activeAccountId(connection),
+				intervalMs: getIntervalMs(),
+				windowFocused: vscode.window.state.focused,
+			});
 			writeFailed = false;
 		} catch (error) {
 			// Shown in the view (stale or unavailable, with Refresh), not only logged.
@@ -144,12 +158,17 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 			}
 			const next = generation.next();
 			const state: ConnectionState = found.kind === 'connected' ? { ...found, generation: next } : found;
-			if (activeAccountId(state) !== activeAccountId(connection)) {
+			const previousAccountId = activeAccountId(connection);
+			if (activeAccountId(state) !== previousAccountId) {
 				// A save error belongs to the previous account; never show it for the new one.
 				writeFailed = false;
 			}
 			connection = state;
 			log(copy.log.stateChanged(state.kind === 'unconnected' ? `unconnected (${state.reason})` : state.kind));
+			// Startup readiness (A1): a lookup that changes the active account (including the first
+			// at activation) delivers that account's pending alerts in a focused window. Queued in the
+			// store, so it never waits for a poll or a focus change.
+			void focusDelivery.lookupApplied(previousAccountId, activeAccountId(state));
 			await render();
 			return state;
 		})();
@@ -196,6 +215,13 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 		onGitHubSessionsChanged(() => {
 			void apply(lookupSilently(log), true).then((state) => (state ? scheduler.trigger('session-changed') : undefined));
 		}),
+		// Focus gating (AD-9): a focused window delivers whatever is still pending for its active
+		// account. Before the first lookup settles there is no active account, so this is a no-op (B2).
+		vscode.window.onDidChangeWindowState((state) => {
+			if (state.focused) {
+				void focusDelivery.focused(activeAccountId(connection));
+			}
+		}),
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration(INTERVAL_SETTING)) {
 				// A fresh interval from the change; no check and no stored change.
@@ -227,6 +253,7 @@ export function activate(context: vscode.ExtensionContext): PulleyTestApi | unde
 						now,
 						activeAccountId: connection.accountId,
 						intervalMs: getIntervalMs(),
+						windowFocused: vscode.window.state.focused,
 					});
 					log(copy.log.debugSeeded(FIFTY));
 					void vscode.window.showInformationMessage(copy.debugSeedDone(FIFTY));

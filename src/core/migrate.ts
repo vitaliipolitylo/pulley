@@ -1,6 +1,6 @@
 // Reads the raw `pulley.state.v1` value into a typed `Stored` (AD-3 step 3). Pure: never
 // mutates its input and never logs; the store logs the returned problem.
-import type { FailureReason, Stored } from './types.ts';
+import type { AlertState, FailureReason, Origin, Stored } from './types.ts';
 
 export const SCHEMA_VERSION = 1;
 
@@ -29,6 +29,10 @@ const FAILURE_REASONS: ReadonlySet<unknown> = new Set<FailureReason>([
 	'graphql_error',
 ]);
 
+const ORIGINS: ReadonlySet<unknown> = new Set<Origin>(['new', 'backlog']);
+
+const ALERT_STATES: ReadonlySet<unknown> = new Set<AlertState>(['none', 'pending', 'shown']);
+
 const ACCOUNT_TIMESTAMPS = ['lastAttemptAt', 'lastSuccessAt', 'lastAppliedFetchStartedAt', 'lastIncompleteFetchStartedAt'] as const;
 
 /** A finite epoch-ms number that Date can represent. */
@@ -42,6 +46,10 @@ function accountFieldProblem(account: Record<string, unknown>): string | undefin
 		if (account[field] !== undefined && !isTimestamp(account[field])) {
 			return `an account has an invalid ${field}`;
 		}
+	}
+	const interval = account.lastAttemptIntervalMs;
+	if (interval !== undefined && !(typeof interval === 'number' && Number.isFinite(interval) && interval > 0)) {
+		return 'an account has an invalid lastAttemptIntervalMs';
 	}
 	const failure = account.lastFailure;
 	if (failure !== undefined) {
@@ -65,9 +73,18 @@ function v1Problem(raw: Record<string, unknown>): string | undefined {
 		if (fieldProblem) {
 			return fieldProblem;
 		}
+		if (typeof account.newSignal !== 'boolean') {
+			return 'an account has an invalid newSignal';
+		}
 		for (const item of Object.values(account.items)) {
 			if (!isRecord(item) || typeof item.id !== 'string' || typeof item.firstSeenAt !== 'number') {
 				return 'an item entry is not an object with a string id and numeric firstSeenAt';
+			}
+			if (!ORIGINS.has(item.origin)) {
+				return 'an item has an invalid origin';
+			}
+			if (!ALERT_STATES.has(item.alert)) {
+				return 'an item has an invalid alert';
 			}
 		}
 	}

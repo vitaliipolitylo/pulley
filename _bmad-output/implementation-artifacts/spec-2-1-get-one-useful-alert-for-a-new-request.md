@@ -2,9 +2,10 @@
 title: 'Story 2.1: Get one useful alert for a new request'
 type: 'feature'
 created: '2026-10-02'
-status: 'ready-for-dev'
+baseline_commit: '0c7012f912bd959a8e87e073fc4dc3d7538fb4f0'
+status: 'done'
 route: 'dispatch'
-review_loop_iteration: 0
+review_loop_iteration: 1
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-6-recover-from-missing-or-uncertain-github-data.md'
@@ -21,7 +22,7 @@ context:
 ## Boundaries & Constraints
 
 **Always:**
-- **Baseline predicate:** an id not already in `items` is **backlog** when the account had no prior complete success (`lastSuccessAt` undefined before this result), or when its previous `lastAttemptAt` or `lastAttemptIntervalMs` is undefined, or when `fetchStartedAt − previous lastAttemptAt > 2 × previous lastAttemptIntervalMs`. "Previous" means the account values before rule 2 records this attempt. Otherwise the item is `origin: 'new'`, `alert: 'pending'`. Existing ids keep `origin`/`alert`, as `upsert` already does.
+- **Baseline predicate:** an id not already in `items` is **backlog** when the account had no prior complete success (`lastSuccessAt` undefined before this result), or when its previous `lastAttemptIntervalMs` is undefined, or when `fetchStartedAt − previous lastSuccessAt > 2 × previous lastAttemptIntervalMs`. The gap runs from the last complete success, so failed and incomplete checks never shorten it. "Previous" means the account values before rule 2 records this attempt. Otherwise the item is `origin: 'new'`, `alert: 'pending'`. Existing ids keep `origin`/`alert`, as `upsert` already does.
 - `newSignal` becomes `true` when a success adds at least one new item, and `false` when a success adds none. Failures and rule-4 no-ops leave it unchanged. (A rule-4 no-op still records the attempt fields per rule 2, so it is not a same-reference result.)
 - **Effects carry their account (A8):** `Effect` becomes `notifyNew { accountId, itemId }` (and, in Story 2.2, `notifyBacklog { accountId, count, firstConnection }`).
 - **Shared delivery helper** `deliverPending(accountId, account, { focused })` in core returns `{ account, effects }`:
@@ -60,7 +61,7 @@ context:
 
 ## I/O & Edge-Case Matrix
 
-The interval I = 900 000 ms, and the previous attempt was at t.
+The interval I = 900 000 ms, and the previous complete success was at t.
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |----------|--------------|---------------------------|----------------|
@@ -68,6 +69,8 @@ The interval I = 900 000 ms, and the previous attempt was at t.
 | New, unfocused | Same, `windowFocused` false | X `pending`, no effect; a later `windowFocused` marks it shown and emits once | N/A |
 | Gap | Success at t+2I+1 adds X | X `backlog`/`none`, no effect | N/A |
 | Gap boundary | Success at exactly t+2I | X is new | N/A |
+| Failure after a gap | Failure at t+3I, then a complete success at t+3I+I/2 adds X | X `backlog`/`none`, no effect | The failure does not shorten the gap |
+| Incomplete inside gap | Incomplete success at t+I, then a complete success at t+2I+1 adds X | X `backlog`/`none`, no effect | N/A |
 | Before baseline | No prior complete success | Every added item is backlog, with no effect | N/A |
 | Already shown | X `shown`, later polls, reloads, or a second window | No further `notifyNew X` | N/A |
 | Re-request kept | X present; requester/requestedAt change | Metadata only; alert unchanged | N/A |
@@ -108,14 +111,14 @@ The interval I = 900 000 ms, and the previous attempt was at t.
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/core/reconcile.ts`, `src/core/windowFocused.ts`, `src/core/types.ts` -- classification, `newSignal`, `Effect.accountId`, `deliverPending` after every result, the transition.
-- [ ] `src/core/copy.ts`, `src/core/migrate.ts` -- notification text and log lines; enum validation.
-- [ ] `src/shell/store.ts`, `src/shell/notifier.ts`, `src/extension.ts` -- effect plumbing, notifier, focus wiring, lookup-time `windowFocused`.
-- [ ] `test/core/reconcile.test.ts`, `test/core/windowFocused.test.ts` -- one table case per matrix row (including focused failure, rule-1 rejection, undefined active account), plus the frozen-input checks.
-- [ ] `test/core/migrate.test.ts` -- invalid `alert`/`origin`/`newSignal` → malformed.
-- [ ] `test/shell/notifier.test.ts` -- requester vs author text; the button opens the exact URL; dismissal is a no-op; a missing item or missing account is logged; `showMessage` is not awaited; a sync throw and an async rejection are caught, logged with `repo#number` only in the stated log order, and never escape; items resolve from `effect.accountId`, not the active account.
-- [ ] `test/smoke/store.test.ts` -- the effect runner gets the written `stored` only after `update` resolves; an account switch while `update` is pending still notifies from the originating account's partition.
-- [ ] `test/smoke/activation.test.ts` -- a pending alert persisted at startup is delivered once after the first lookup in a focused window.
+- [x] `src/core/reconcile.ts`, `src/core/windowFocused.ts`, `src/core/types.ts` -- classification, `newSignal`, `Effect.accountId`, `deliverPending` after every result, the transition.
+- [x] `src/core/copy.ts`, `src/core/migrate.ts` -- notification text and log lines; enum validation.
+- [x] `src/shell/store.ts`, `src/shell/notifier.ts`, `src/extension.ts` -- effect plumbing, notifier, focus wiring, lookup-time `windowFocused`.
+- [x] `test/core/reconcile.test.ts`, `test/core/windowFocused.test.ts` -- one table case per matrix row (including focused failure, rule-1 rejection, undefined active account), plus the frozen-input checks.
+- [x] `test/core/migrate.test.ts` -- invalid `alert`/`origin`/`newSignal` → malformed.
+- [x] `test/shell/notifier.test.ts` -- requester vs author text; the button opens the exact URL; dismissal is a no-op; a missing item or missing account is logged; `showMessage` is not awaited; a sync throw and an async rejection are caught, logged with `repo#number` only in the stated log order, and never escape; items resolve from `effect.accountId`, not the active account.
+- [x] `test/smoke/store.test.ts` -- the effect runner gets the written `stored` only after `update` resolves; an account switch while `update` is pending still notifies from the originating account's partition.
+- [x] `test/smoke/activation.test.ts` -- a pending alert persisted at startup is delivered once after the first lookup in a focused window.
 
 **Acceptance Criteria:**
 - Given two windows that aren't racing (see Design Notes, E1), one focused, when one check adds X, then exactly one native notification appears across both windows, and reloading either window never shows it again.
@@ -134,8 +137,36 @@ The interval I = 900 000 ms, and the previous attempt was at t.
 
 ## Implementation Notes
 
+- `deliverPending` and a small `deliverToActive(stored, activeAccountId, focused)` live in `src/core/windowFocused.ts`; `reconcile` uses `deliverToActive` for the rule-1 return and `deliverPending` for applied results. `notifyBacklog` also gained `accountId` now (A8), though nothing emits it until Story 2.2.
+- `classify(previous, at)` in `reconcile.ts` implements the baseline predicate once per result, against the account before rule 2. `newSignal` is set only by `applySuccess` (rule-4 no-ops return before it).
+- `src/shell/notifier.ts` also exports `createFocusDelivery({ store, isFocused, log })` with `focused(activeAccountId)` and `lookupApplied(previous, next)`. `extension.ts` calls `lookupApplied` inside `apply` after each applied lookup (it only mutates when the active account changed to a defined account and the window is focused), and `focused` from `onDidChangeWindowState`. The composition (store with the notifier, focus delivery, and `openUrl` through `openPullRequest`) is one factory, `createAlertingStore` in `src/shell/alertWiring.ts`, which `extension.ts` calls with the VS Code APIs injected. The test host has no GitHub session, so the real activation never gets an active account; `test/smoke/activation.test.ts` drives that same factory over a seeded memento (A1 delivery, the button's exact URL, and the https://github.com/ guard). The baseline gap is measured from `lastSuccessAt` (renegotiated predicate), and `migrate` rejects a present `lastAttemptIntervalMs` that is not a finite positive number.
+- `createStore` now catches a throwing effect runner and logs `copy.log.effectsFailed`, so a written result never rejects `mutate` (which would otherwise mark the check as a write failure). The notifier never throws anyway.
+- New log lines: `notifiedNew(ref)`, `notifyFailed(subject)`, `notifyItemMissing(accountId, itemId)`, `effectsFailed`, `focusDeliveryFailed`. None carries a title.
+- `pulley.debugSeed` passes the real focus state per the Code Map, so seeding 50 items within 2 × interval of a prior complete check classifies them new and shows 50 notifications in a focused Development window.
+
 ## Spec Change Log
 
 - **2026-10-03, Epic 2 spec review fixes:** finding IDs cited inline (A1–A15 = adversarial findings 1–15, E1–E7 = edge-case findings 1–7) refer to `review-epic-2-specs-2026-10-03.md`, not PRD assumptions such as A8. B- and X-IDs refer to the Review Triage Log of `spec-epic-2-spec-review-fixes.md`. This story resolves A1, A2, A7, A8, E1, B2, X1, X3, and X4; moves the baseline note before Code Map; and renames "Still pending" to "Already shown".
+- **2026-10-03, review loop 1 (human-renegotiated frozen intent):** triage #1 found that a failed attempt advanced `lastAttemptAt`, so a failed first check after VS Code was closed, followed by a success one interval later, classified the whole accumulated backlog as new (one notification each). That contradicts the epic rule that requests arriving while closed or during a long gap join the backlog silently. With the user's approval, the baseline predicate now measures the gap from the previous `lastSuccessAt`, and the matrix gains "Failure after a gap" and "Incomplete inside gap". The code was patched in place, not re-derived. KEEP: all other behaviour of the first implementation (delivery helper, notifier, store runner signature, focus delivery, tests).
 
 ## Review Triage Log
+
+| # | Source | Location | Finding | Verdict | Evidence | Route |
+|---|--------|----------|---------|---------|----------|-------|
+| 1 | edge-case-hunter | src/core/reconcile.ts `classify` | A failed attempt advances `lastAttemptAt`, so after a long gap (VS Code closed, sleep) a failed first check followed by a success one interval later classifies the whole accumulated backlog as new and shows one notification per item | high | Rule 2 records `lastAttemptAt` for failures too; the scheduler's next periodic success lands at T+I, gap I ≤ 2I → `new`. This contradicts the epic AC that requests arriving while closed or during a long check gap join the backlog silently. The predicate is fixed in the frozen Boundaries (and AD-7), so the code matches the spec | intent_gap → resolved by human: gap now measured from last complete success; patched in place |
+| 2 | verification-gap, blind-hunter | src/extension.ts wiring; test/smoke/activation.test.ts | Notifier, focus ctx, `lookupApplied` and `onDidChangeWindowState` wiring in `extension.ts` is not run by any test; the A1 smoke test re-creates the wiring | medium | Pre-verified gap: deleting the notifier argument or hard-coding `windowFocused: false` passes all tests | patch |
+| 3 | verification-gap | src/extension.ts `openUrl` | Notification button's `https://github.com/` guard is not exercised | low | Pre-verified gap: every notifier test injects its own `openUrl` | patch |
+| 4 | blind-hunter, edge-case-hunter | src/core/migrate.ts `accountFieldProblem` | `lastAttemptIntervalMs` is never validated, and `classify` now depends on it (NaN → all new, negative → all backlog) | low | Only corrupt stored state reaches it, but the fix is adding the field to the existing validator | patch |
+| 5 | edge-case-hunter | src/core/types.ts `newSignal` comment | Comment says "cleared by a success that adds none", but rule-4 no-op successes leave it unchanged | low | Frozen spec says rule-4 no-ops leave `newSignal` unchanged; comment is inaccurate; direct correction | patch |
+| 6 | blind-hunter | src/core/windowFocused.ts `deliverPending` | No cap or grouping on a burst of new notifications | false | Frozen intent requires one `notifyNew` per pending item and excludes aggregate notifications from this story | reject |
+| 7 | blind-hunter | src/extension.ts focus delivery | A pending alert written by an unfocused window waits until the focused window's next check or focus change | low | Delay bounded by that window's own interval; fix needs cross-window change wiring | reject |
+| 8 | blind-hunter, edge-case-hunter | src/extension.ts:105; src/shell/notifier.ts `deliver` | Focus read when ctx is built, not when the queued transition runs | low | Only a focus change during a millisecond queue wait; fix adds getter plumbing | reject |
+| 9 | blind-hunter | src/shell/notifier.ts runner | `notifyBacklog` ignored without a log | low | No transition emits it until Story 2.2, which implements it; documented inline | reject |
+| 10 | blind-hunter, verification-gap | src/shell/notifier.ts `openUrl` catch | Rejection path untested / unreachable with production `openUrl` | false | `openUrl` is an injected dependency; the catch upholds the "never escapes" contract regardless of implementation | reject |
+| 11 | blind-hunter, edge-case-hunter | src/core/reconcile.ts `classify` | A late success older than the previous attempt yields a negative gap → `new` | false | A newer recorded attempt means checks were continuous; `new` is correct | reject |
+| 12 | blind-hunter | src/core/copy.ts `newRequestNotification` | No title length limit or escaping | low | Copy is fixed by the frozen spec; VS Code renders plain text | reject |
+| 13 | blind-hunter | src/core/windowFocused.ts | Notifications ordered by opaque node id | false | Frozen spec requires sort by id | reject |
+| 14 | blind-hunter | src/shell/notifier.ts `createFocusDelivery` | A failed focus-delivery write is only logged, not shown as `writeFailed` | low | No alert is lost (effects run only after a successful write); next focus retries | reject |
+| 15 | blind-hunter | sprint-status.yaml | Story status `in-progress` while spec is `in-review` | false | Sprint status is synced at presentation; not a code defect | reject |
+| 16 | edge-case-hunter | src/core/reconcile.ts `applySuccess` | A success older than an applied incomplete result clears a `newSignal` a newer result set | low | Rare out-of-order apply; frozen spec defines newSignal by "a success that adds none"; fix adds a branch | reject |
+| 17 | edge-case-hunter | src/shell/notifier.ts with migrate.ts | Item with malformed repo/number/title produces `undefined` text | low | Only corrupt stored state; adds guards | reject |

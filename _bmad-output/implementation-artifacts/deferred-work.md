@@ -33,3 +33,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-spec-review-fixes.md`
   summary: The Story 2.4 dogfood checklist has no scenarios for a next-day startup reminder, a gap reminder, unfocused-then-focus delivery, the Open Pull Request / Open Review Queue buttons, or a pending alert at startup.
   evidence: Epic 2 spec review loop (B2-10b). These behaviors are specified in 2.1 and 2.2 but are never exercised on an installed build.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-get-one-useful-alert-for-a-new-request.md`
+  summary: Update architecture AD-7 (and epic-2-context) so the new/backlog gap is measured from the previous `lastSuccessAt`, not `lastAttemptAt`.
+  evidence: Story 2.1 review loop 1 changed the predicate with the user's approval because a failed attempt shortened the gap and turned a closed-VS-Code backlog into per-item notifications; the planning docs still state the old rule.

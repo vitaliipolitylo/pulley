@@ -1,6 +1,8 @@
 import * as assert from 'assert';
 import { emptyAccount, reconcile } from '../../src/core/reconcile.ts';
-import type { Stored, TransitionResult } from '../../src/core/types.ts';
+import type { Effect, Stored, Tracked, TransitionResult } from '../../src/core/types.ts';
+import { windowFocused } from '../../src/core/windowFocused.ts';
+import { createNotifier } from '../../src/shell/notifier.ts';
 import { createStore, STATE_KEY, type StateMemento } from '../../src/shell/store.ts';
 
 /** A memento whose writes resolve only when the test releases them. */
@@ -89,7 +91,7 @@ suite('Store', () => {
 		const X = { ...emptyAccount(), firstCheckDone: true, lastSuccessAt: 1, items: {} };
 		const m = controllableMemento({ schemaVersion: 1, accounts: { X } });
 		const store = createStore(m.memento, () => {});
-		const call = store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1 });
+		const call = store.mutate(reconcile, { ok: true, accountId: 'Y', fetchStartedAt: 5, complete: true, items: [] }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false });
 		await tick();
 		m.releaseNext();
 		await call;
@@ -103,7 +105,7 @@ suite('Store', () => {
 		const store = createStore(m.memento, () => {});
 		let notified = 0;
 		store.onDidChange(() => notified++);
-		await store.mutate(reconcile, { ok: false, accountId: 'X', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: 'Y', intervalMs: 1 });
+		await store.mutate(reconcile, { ok: false, accountId: 'X', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: 'Y', intervalMs: 1, windowFocused: false });
 		assert.strictEqual(m.updates(), 0);
 		assert.strictEqual(notified, 1);
 	});
@@ -171,5 +173,76 @@ suite('Store', () => {
 		m.releaseNext();
 		await good;
 		assert.deepStrictEqual(Object.keys((m.value() as Stored).accounts.log.items), ['0:after']);
+	});
+
+	test('Story 2.1: the effect runner gets the written stored, only after update resolves', async () => {
+		const pending: Tracked = { id: 'X', repo: 'o/r', number: 7, title: 'T', author: 'a', url: 'https://github.com/o/r/pull/7', firstSeenAt: 1, origin: 'new', alert: 'pending' };
+		const m = controllableMemento({ schemaVersion: 1, accounts: { Y: { ...emptyAccount(), items: { X: pending } } } });
+		const runs: Array<{ effects: Effect[]; stored: Stored; lastEvent: string }> = [];
+		const store = createStore(m.memento, () => {}, (effects, stored) => {
+			runs.push({ effects, stored, lastEvent: m.events[m.events.length - 1] });
+		});
+		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y' });
+		await tick();
+		await tick();
+		assert.strictEqual(runs.length, 0, 'no effects while the write is pending');
+		m.releaseNext();
+		await call;
+		assert.strictEqual(runs.length, 1);
+		assert.deepStrictEqual(runs[0].effects, [{ kind: 'notifyNew', accountId: 'Y', itemId: 'X' }]);
+		assert.strictEqual(runs[0].lastEvent, 'update:done');
+		assert.strictEqual(runs[0].stored, m.value(), 'the runner gets the very state that was written');
+		assert.strictEqual(runs[0].stored.accounts.Y.items.X.alert, 'shown');
+	});
+
+	test('Story 2.1 (A8): an account switch while update is pending still notifies from the originating partition', async () => {
+		const item = (title: string): Tracked => ({ id: 'X', repo: 'o/r', number: 7, title, author: 'a', url: 'https://github.com/o/r/pull/7', firstSeenAt: 1, origin: 'new', alert: 'pending' });
+		const m = controllableMemento({
+			schemaVersion: 1,
+			accounts: { A: { ...emptyAccount(), items: { X: item('From A') } }, B: { ...emptyAccount(), items: { X: item('From B') } } },
+		});
+		const texts: string[] = [];
+		const notifier = createNotifier({
+			showMessage: (text) => {
+				texts.push(text);
+				return new Promise<string | undefined>(() => {});
+			},
+			openUrl: () => undefined,
+			log: () => {},
+		});
+		const store = createStore(m.memento, () => {}, notifier);
+		let active = 'A';
+		const first = store.mutate(reconcile, { ok: false, accountId: 'A', fetchStartedAt: 5, reason: 'network' }, { now: 9, activeAccountId: active, intervalMs: 1, windowFocused: true });
+		await tick();
+		active = 'B';
+		const second = store.mutate(windowFocused, undefined, { activeAccountId: active });
+		m.releaseNext();
+		await first;
+		assert.strictEqual(texts.length, 1);
+		assert.match(texts[0], /'From A'/);
+		await tick();
+		m.releaseNext();
+		await second;
+		assert.strictEqual(texts.length, 2);
+		assert.match(texts[1], /'From B'/);
+	});
+
+	test('Story 2.1: a throwing effect runner is logged; the write stands and mutate resolves', async () => {
+		const lines: string[] = [];
+		const pending: Tracked = { id: 'X', repo: 'o/r', number: 7, title: 'T', author: 'a', url: 'u', firstSeenAt: 1, origin: 'new', alert: 'pending' };
+		const m = controllableMemento({ schemaVersion: 1, accounts: { Y: { ...emptyAccount(), items: { X: pending } } } });
+		const store = createStore(m.memento, (l) => lines.push(l), () => {
+			throw new Error('runner broke');
+		});
+		let notified = 0;
+		store.onDidChange(() => notified++);
+		const call = store.mutate(windowFocused, undefined, { activeAccountId: 'Y' });
+		await tick();
+		m.releaseNext();
+		await call;
+		assert.strictEqual((m.value() as Stored).accounts.Y.items.X.alert, 'shown');
+		assert.strictEqual(notified, 1);
+		assert.strictEqual(lines.length, 1);
+		assert.match(lines[0], /runner broke/);
 	});
 });

@@ -21,7 +21,7 @@ export interface Store {
 	/**
 	 * Serialized per window: re-read → migrate → transition → await write → run effects → notify.
 	 * Read-only mode skips the write and effects. Rejects only this call when the transition
-	 * throws or the write fails; later calls still run.
+	 * throws or the write fails; later calls still run. A failing effect runner is logged, not rejected.
 	 */
 	mutate<I, C>(transition: Transition<I, C>, input: I, ctx: C): Promise<void>;
 	/** A fresh, migrated read of the stored state (how other windows' writes appear). */
@@ -33,10 +33,16 @@ export interface Store {
 	onDidChange(listener: () => void): { dispose(): void };
 }
 
+/**
+ * Runs a transition's effects after its write resolved. `stored` is the state just written, so
+ * effects are composed from it without a second read (another window's write can't swap an item).
+ */
+export type EffectRunner = (effects: Effect[], stored: Stored) => Promise<void> | void;
+
 export function createStore(
 	memento: StateMemento,
 	log: (line: string) => void,
-	runEffects?: (effects: Effect[]) => Promise<void> | void,
+	runEffects?: EffectRunner,
 ): Store {
 	const listeners = new Set<() => void>();
 	// Log lines are once per window: newer schema once, each malformed problem once.
@@ -82,7 +88,12 @@ export function createStore(
 					await memento.update(STATE_KEY, result.stored);
 				}
 				if (runEffects && result.effects.length > 0) {
-					await runEffects(result.effects);
+					// The write already succeeded, so an effect failure never rejects this call.
+					try {
+						await runEffects(result.effects, result.stored);
+					} catch (error) {
+						log(copy.log.effectsFailed(shortReason(error)));
+					}
 				}
 				notify();
 			};
