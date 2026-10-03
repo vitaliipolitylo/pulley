@@ -6,7 +6,7 @@
 # Retrospective: optional, done
 
 generated: 09-30-2026 01:51
-last_updated: 10-03-2026 21:45
+last_updated: 10-03-2026 22:30
 project: Pulley
 project_key: NOKEY
 tracking_system: file-system
@@ -27,6 +27,6 @@ development_status:
   2-2-return-to-a-backlog-with-a-daily-limit: review
   2-3-read-queue-state-at-a-glance: review
   2-4-package-and-technically-dogfood-the-calm-mvp: review
-  2-5-validate-the-experience-with-developers: backlog
+  2-5-validate-the-experience-with-developers: review
   2-6-publish-pulley-with-a-support-path: backlog
   epic-2-retrospective: optional

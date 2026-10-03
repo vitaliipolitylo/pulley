@@ -55,6 +55,11 @@ While running, also note whether the count, repository names, corgi state, and r
 
 A Development Host row on the recorded SHA counts like any other row. Any other Fail is **No-go** until it is fixed and the row is re-run on a new build (record the new SHA).
 
+After a Go here, the same `.vsix` goes to the developer usability test (Story 2.5), which has its own release decision. Story 2.6 needs both decisions to be Go.
+
+- Protocol: [`../validation/usability-protocol.md`](../validation/usability-protocol.md)
+- Results and release decision: [`../validation/usability-results.md`](../validation/usability-results.md)
+
 | Field | Value |
 |---|---|
 | Decision (Go / No-go) | _fill in_ |

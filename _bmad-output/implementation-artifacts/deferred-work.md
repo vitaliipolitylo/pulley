@@ -50,3 +50,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-4-package-and-technically-dogfood-the-calm-mvp.md`
   summary: Add a self-test for `scripts/check-package-files.mjs` so its allowlist and token-scan failure branches are exercised (out-of-allowlist path, `gh*_`/`github_pat_`/literal Bearer in the bundle, and `bearer ${...}` placeholders passing).
   evidence: No test under `test/` references the script; CI only runs it on an already-clean package, so a loosened allowlist or broken pattern would pass silently. Requires extracting the matching into an importable helper with fixtures under `test/shell/`.
+- source_spec: `D:\projects\Pulley\_bmad-output\implementation-artifacts\spec-2-5-validate-the-experience-with-developers.md`
+  summary: Decide whether a usability Go reached after `fix before 2.6` specs land needs the fixed build re-dogfooded (or re-tested) before Story 2.6 publishes it.
+  evidence: The Go rule in `docs/validation/usability-results.md` needs only those specs `done`. The published build then contains code developers never used. This is the same gap as B10, which spec 2.6's change log deferred.
